@@ -4,12 +4,12 @@ import os
 import json
 import logging
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QPushButton, QComboBox, QSlider, QSpinBox, QListWidget,
-    QMessageBox, QFrame, QSplitter, QTextEdit, QApplication
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QSpinBox,
+    QMessageBox, QFrame, QSplitter, QApplication
 )
-from PyQt5.QtCore import Qt, QSize, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 
 from gui.styles import QSS_STYLESHEET
 from gui.remote_viewer import RemoteViewerWidget
@@ -34,74 +34,6 @@ def get_local_ip():
         return ip
     except Exception:
         return "127.0.0.1"
-
-
-class SessionWindow(QMainWindow):
-    """
-    Separate window dedicated to displaying the remote screen and capturing control inputs.
-    It closes the connection when closed.
-    """
-    closed_signal = pyqtSignal()
-
-    def __init__(self, client: RemoteControlClient, parent=None):
-        super().__init__(parent)
-        self.client = client
-        self.setWindowTitle("TeleControl - 원격 제어 세션")
-        self.resize(1024, 768)
-        
-        # Central widget is the RemoteViewerWidget
-        self.viewer = RemoteViewerWidget(self)
-        self.viewer.set_client(self.client)
-        self.setCentralWidget(self.viewer)
-        
-        # Floating or overlay status bar for network stats
-        self.status_bar_label = QLabel("연결 중...", self)
-        self.statusBar().addWidget(self.status_bar_label)
-        
-        # Configure client callbacks
-        self.client.set_callbacks(
-            frame_cb=self.viewer.update_frame,
-            status_cb=self.handle_status_update,
-            stats_cb=self.handle_stats_update
-        )
-        
-        self.is_fullscreen_mode = False
-
-    def handle_status_update(self, message: str):
-        self.status_bar_label.setText(message)
-        if not self.client.is_connected:
-            self.close()
-
-    def handle_stats_update(self, fps: float, kb_s: float, latency: float):
-        host_type = "Windows PC" if self.client.is_windows_host else "안드로이드 폰"
-        stats_text = (
-            f"| 대상 기기: {host_type} "
-            f"| FPS: {fps:.1f} "
-            f"| 전송 속도: {kb_s:.1f} KB/s "
-            f"| 지연 시간: {latency:.1f} ms | (F11 키: 전체 화면 토글)"
-        )
-        self.status_bar_label.setText(stats_text)
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_F11:
-            self.is_fullscreen_mode = not self.is_fullscreen_mode
-            if self.is_fullscreen_mode:
-                self.showFullScreen()
-            else:
-                self.showNormal()
-            event.accept()
-        else:
-            # Shift focus to viewer if needed, or pass
-            super().keyPressEvent(event)
-
-    def closeEvent(self, event):
-        """
-        Disconnects the WebSocket client when the session window is closed.
-        """
-        # Run async disconnect in the event loop
-        asyncio.create_task(self.client.disconnect())
-        self.closed_signal.emit()
-        event.accept()
 
 
 class MainWindow(QMainWindow):
@@ -132,9 +64,6 @@ class MainWindow(QMainWindow):
         
         # Set server log callback
         self.server.set_log_callback(self.append_server_log)
-        
-        # Active session window
-        self.session_window = None
         
         # Show maximized on startup
         self.showMaximized()
@@ -455,33 +384,34 @@ class MainWindow(QMainWindow):
 
     async def connect_to_server_async(self, ip: str, port: int):
         try:
-            await self.client.connect(ip, port)
-            
-            # Save to history on successful connection trigger
-            self.add_to_history(ip, port)
-            
-            # Reset connect button
-            self.btn_connect.setEnabled(True)
-            self.btn_connect.setText("연결 종료")
-            self.btn_connect.setObjectName("dangerButton")
-            self.btn_connect.setStyleSheet("") # Clear QSS override
-            self.setStyleSheet(QSS_STYLESHEET)
-            
-            # Configure client callbacks to update embedded viewer
+            # 콜백 먼저 등록 후 연결 (연결 직후 핸드셰이크 메시지 수신 대비)
             self.client.set_callbacks(
                 frame_cb=self.viewer.update_frame,
                 status_cb=self.handle_client_status_update,
                 stats_cb=self.handle_client_stats_update
             )
             
-            # Auto-collapse settings sidebar to maximize remote landscape view space
+            await self.client.connect(ip, port)
+            
+            # Save to history on successful connection
+            self.add_to_history(ip, port)
+            
+            # Update connect button to show disconnect option
+            self.btn_connect.setEnabled(True)
+            self.btn_connect.setText("연결 종료")
+            self.btn_connect.setObjectName("dangerButton")
+            self.btn_connect.setStyleSheet("")
+            self.setStyleSheet(QSS_STYLESHEET)
+            
+            # Auto-collapse settings sidebar to maximize remote view space
             self.left_panel.setVisible(False)
             self.btn_toggle_sidebar.setText("▶ 설정 창 펴기")
             
-            # Focus on the remote viewer widget so keyboard inputs work immediately
+            # Focus on the remote viewer so keyboard inputs work immediately
             self.viewer.setFocus()
             
         except Exception as e:
+            self.client.set_callbacks(None, None, None)
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("연결")
             self.btn_connect.setObjectName("primaryButton")
@@ -536,20 +466,16 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """
-        Shuts down background server and active sessions before closing application.
+        Shuts down background server and active client connection before closing.
         """
-        if getattr(self, "session_window", None):
-            self.session_window.close()
+        loop = asyncio.get_event_loop()
         
         # Stop hosting server
         if self.server.is_running:
-            # We create a task but block closing briefly until stopped
-            loop = asyncio.get_event_loop()
             loop.run_until_complete(self.server.stop())
             
-        # Also disconnect client if active
+        # Disconnect client if active
         if self.client.is_connected:
-            loop = asyncio.get_event_loop()
             loop.run_until_complete(self.client.disconnect())
             
         event.accept()
