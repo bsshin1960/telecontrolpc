@@ -1,0 +1,5 @@
+websockets>=12.0
+mss>=9.0
+pillow>=10.0
+qasync>=0.27.0
+PyQt5>=5.15.0
