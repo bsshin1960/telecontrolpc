@@ -40,3 +40,7 @@ desktop.ini
 
 # User data
 .telecontrol_history.json
+
+# Binaries
+*.exe
+
