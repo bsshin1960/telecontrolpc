@@ -434,11 +434,7 @@ class MainWindow(QMainWindow):
 
     def handle_client_stats_update(self, fps: float, kb_s: float, latency: float):
         host_type = "Windows PC" if self.client.is_windows_host else "안드로이드"
-        stats_text = (
-            f"연결됨 ({host_type})\n"
-            f"FPS: {fps:.1f} | {kb_s:.1f} KB/s\n"
-            f"지연 시간: {latency:.1f} ms"
-        )
+        stats_text = f"연결됨 ({host_type})"
         self.lbl_client_status.setText(stats_text)
 
     def handle_client_closed(self):
