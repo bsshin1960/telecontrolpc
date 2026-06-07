@@ -429,7 +429,7 @@ class MainWindow(QMainWindow):
         await self.client.disconnect()
 
     def handle_client_status_update(self, message: str):
-        if not self.client.is_connected:
+        if "연결이 해제되었습니다" in message or "연결 실패" in message or "연결이 종료되었습니다" in message:
             self.handle_client_closed()
 
     def handle_client_stats_update(self, fps: float, kb_s: float, latency: float):

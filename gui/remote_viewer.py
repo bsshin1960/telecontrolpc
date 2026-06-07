@@ -51,6 +51,7 @@ class RemoteViewerWidget(QWidget):
         Emits a signal so the actual pixmap update always runs on the Qt main thread.
         """
         try:
+            logger.debug(f"update_frame called, size={len(jpeg_bytes)} bytes")
             self._frame_signal.emit(jpeg_bytes)
         except Exception as e:
             logger.error(f"update_frame emit error: {e}")
@@ -58,10 +59,13 @@ class RemoteViewerWidget(QWidget):
     def _on_frame_received(self, jpeg_bytes: bytes):
         """Slot — always executes on the Qt main thread."""
         if not jpeg_bytes:
+            logger.warning("_on_frame_received received empty jpeg_bytes")
             return
         pixmap = QPixmap()
         if pixmap.loadFromData(jpeg_bytes, "JPEG"):
+            old_w, old_h = pixmap.width(), pixmap.height()
             self.current_pixmap = self.crop_padding(pixmap)
+            logger.debug(f"Successfully decoded JPEG, cropped: {old_w}x{old_h} -> {self.current_pixmap.width()}x{self.current_pixmap.height()}")
             self.update()  # schedule repaint on main thread
         else:
             logger.warning(f"Failed to decode JPEG frame ({len(jpeg_bytes)} bytes)")

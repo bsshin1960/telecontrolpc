@@ -112,12 +112,14 @@ class RemoteControlClient:
         - Binary messages are screen JPEG frames.
         """
         try:
+            logger.debug("Starting client receive loop")
             async for message in self.websocket:
                 # Stats calculation
                 current_time = time.time()
                 
                 # Check for handshake
                 if isinstance(message, str):
+                    logger.debug(f"Received text message: {message}")
                     if "device=windows" in message:
                         self.is_windows_host = True
                         self.log_status("Windows 원격 호스트 감지: 확장 키보드/마우스 입력 기능이 활성화되었습니다.")
@@ -125,12 +127,16 @@ class RemoteControlClient:
                 
                 # Process message
                 if isinstance(message, bytes):
+                    logger.debug(f"Received binary message: {len(message)} bytes")
                     self.frame_count += 1
                     self.byte_count += len(message)
                     
                     # Call frame callback to update the display
                     if self.frame_callback:
-                        self.frame_callback(message)
+                        try:
+                            self.frame_callback(message)
+                        except Exception as cb_err:
+                            logger.error(f"Error calling frame callback: {cb_err}")
                         
                 # Update statistics every second
                 delta = current_time - self.last_stats_time
