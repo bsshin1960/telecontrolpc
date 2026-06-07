@@ -390,28 +390,34 @@ class MainWindow(QMainWindow):
                 status_cb=self.handle_client_status_update,
                 stats_cb=self.handle_client_stats_update
             )
-            
+
+            # 뷰어에 연결 중 상태 표시
+            self.viewer.set_status_text(f"{ip}:{port} 에 연결 중...")
+            self.viewer.current_pixmap = None
+            self.viewer.update()
+
             await self.client.connect(ip, port)
-            
+
             # Save to history on successful connection
             self.add_to_history(ip, port)
-            
+
             # Update connect button to show disconnect option
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("연결 종료")
             self.btn_connect.setObjectName("dangerButton")
             self.btn_connect.setStyleSheet("")
             self.setStyleSheet(QSS_STYLESHEET)
-            
-            # Auto-collapse settings sidebar to maximize remote view space
-            self.left_panel.setVisible(False)
-            self.btn_toggle_sidebar.setText("▶ 설정 창 펴기")
-            
+
+            # 뷰어 상태 텍스트 업데이트 (화면 스트림 대기 중)
+            self.viewer.set_status_text("화면 스트림 수신 대기 중...")
+
+            # 설정창은 그대로 유지 (사용자가 직접 접을 수 있음)
             # Focus on the remote viewer so keyboard inputs work immediately
             self.viewer.setFocus()
-            
+
         except Exception as e:
             self.client.set_callbacks(None, None, None)
+            self.viewer.set_status_text("원격 화면을 기다리는 중...")
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("연결")
             self.btn_connect.setObjectName("primaryButton")
@@ -441,13 +447,17 @@ class MainWindow(QMainWindow):
         self.btn_connect.setObjectName("primaryButton")
         self.btn_connect.setStyleSheet("")
         self.setStyleSheet(QSS_STYLESHEET)
-        
+
         self.lbl_client_status.setText("오프라인")
         self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold; margin-top: 5px;")
-        
+
         self.client.set_callbacks(None, None, None)
-        
-        # Restore settings sidebar when disconnected
+
+        # 뷰어 초기화
+        self.viewer.current_pixmap = None
+        self.viewer.set_status_text("원격 화면을 기다리는 중...")
+
+        # 연결 해제 시 설정창 복원
         self.left_panel.setVisible(True)
         self.btn_toggle_sidebar.setText("◀ 설정 창 접기")
 
