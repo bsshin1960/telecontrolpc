@@ -6,10 +6,13 @@ import logging
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox,
-    QMessageBox, QFrame, QSplitter, QApplication
+    QMessageBox, QFrame, QSplitter, QApplication,
+    QDialog, QDialogButtonBox, QFormLayout
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+
+import config as app_config
 
 from gui.styles import QSS_STYLESHEET
 from gui.remote_viewer import RemoteViewerWidget
@@ -64,6 +67,7 @@ class MainWindow(QMainWindow):
         
         # Set server log callback
         self.server.set_log_callback(self.append_server_log)
+        self.server.set_id_callback(self.handle_server_id_received)
         
         # Floating restore button for fullscreen mode
         self.floating_restore_btn = QPushButton("전체 화면 종료 ✕", self)
@@ -126,7 +130,14 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(lbl_main_title)
         
         header_layout.addStretch(1)
-        
+
+        # Relay Server settings button
+        self.btn_settings = QPushButton("⚙ 서버 설정", self.header_widget)
+        self.btn_settings.setCursor(Qt.PointingHandCursor)
+        self.btn_settings.setObjectName("fullscreenButton")
+        self.btn_settings.clicked.connect(self.open_settings_dialog)
+        header_layout.addWidget(self.btn_settings)
+
         # Full Screen button
         self.btn_fullscreen = QPushButton("전체 화면", self.header_widget)
         self.btn_fullscreen.setCursor(Qt.PointingHandCursor)
@@ -186,12 +197,11 @@ class MainWindow(QMainWindow):
         
         left_layout.addStretch(1)
         
-        # Pre-fill Client IP and Port if history exists
+        # Pre-fill Client Connection ID if history exists
         if self.history:
             try:
-                ip, port = self.history[0].split(":")
-                self.edt_client_ip.setText(ip)
-                self.spn_client_port.setValue(int(port))
+                conn_id = self.history[0]
+                self.edt_connection_id.setText(conn_id)
             except Exception:
                 pass
         
@@ -236,11 +246,11 @@ class MainWindow(QMainWindow):
         ip_layout.setContentsMargins(5, 5, 5, 5)
         ip_layout.setSpacing(3)
         
-        ip_title = QLabel("내 주소", ip_card)
+        ip_title = QLabel("연결 ID", ip_card)
         ip_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
         ip_layout.addWidget(ip_title)
         
-        self.lbl_ip = QLabel(get_local_ip(), ip_card)
+        self.lbl_ip = QLabel("------", ip_card)
         self.lbl_ip.setObjectName("ipLabel")
         self.lbl_ip.setAlignment(Qt.AlignCenter)
         ip_layout.addWidget(self.lbl_ip)
@@ -260,42 +270,23 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(2, 5, 2, 5)
         layout.setSpacing(10)
         
-        # Connection Form - IP Card
-        ip_frame = QFrame(self.client_container)
-        ip_frame.setObjectName("statusCard")
-        ip_layout = QVBoxLayout(ip_frame)
-        ip_layout.setContentsMargins(5, 5, 5, 5)
-        ip_layout.setSpacing(3)
+        # Connection Form - ID Card
+        id_frame = QFrame(self.client_container)
+        id_frame.setObjectName("statusCard")
+        id_layout = QVBoxLayout(id_frame)
+        id_layout.setContentsMargins(5, 5, 5, 5)
+        id_layout.setSpacing(3)
         
-        lbl_ip_title = QLabel("원격 주소", ip_frame)
-        lbl_ip_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
+        lbl_id_title = QLabel("원격 연결 ID", id_frame)
+        lbl_id_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
         
-        self.edt_client_ip = QLineEdit(ip_frame)
-        self.edt_client_ip.setPlaceholderText("예: 192.168.0.15")
-        self.edt_client_ip.setAlignment(Qt.AlignCenter)
+        self.edt_connection_id = QLineEdit(id_frame)
+        self.edt_connection_id.setPlaceholderText("6자리 번호 입력")
+        self.edt_connection_id.setAlignment(Qt.AlignCenter)
         
-        ip_layout.addWidget(lbl_ip_title)
-        ip_layout.addWidget(self.edt_client_ip)
-        layout.addWidget(ip_frame)
-        
-        # Connection Form - Port Card
-        port_frame = QFrame(self.client_container)
-        port_frame.setObjectName("statusCard")
-        port_layout = QVBoxLayout(port_frame)
-        port_layout.setContentsMargins(5, 5, 5, 5)
-        port_layout.setSpacing(3)
-        
-        lbl_port_title = QLabel("원격 포트", port_frame)
-        lbl_port_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
-        
-        self.spn_client_port = QSpinBox(port_frame)
-        self.spn_client_port.setRange(1024, 65535)
-        self.spn_client_port.setValue(8080)
-        self.spn_client_port.setAlignment(Qt.AlignCenter)
-        
-        port_layout.addWidget(lbl_port_title)
-        port_layout.addWidget(self.spn_client_port)
-        layout.addWidget(port_frame)
+        id_layout.addWidget(lbl_id_title)
+        id_layout.addWidget(self.edt_connection_id)
+        layout.addWidget(id_frame)
         
         # Connect Button
         self.btn_connect = QPushButton("연결", self.client_container)
@@ -348,6 +339,65 @@ class MainWindow(QMainWindow):
         self.is_fullscreen_mode = False
         self.floating_restore_btn.hide()
 
+    # Settings Dialog
+    def open_settings_dialog(self):
+        """
+        릴레이 서버 IP와 포트를 설정하는 다이얼로그를 엽니다.
+        """
+        cfg = app_config.load_config()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("릴레이 서버 설정")
+        dialog.setMinimumWidth(360)
+        dialog.setStyleSheet(self.styleSheet())
+
+        form = QFormLayout(dialog)
+        form.setContentsMargins(20, 20, 20, 20)
+        form.setSpacing(12)
+
+        desc = QLabel(
+            "AWS EC2 릴레이 서버의 IP 주소와 포트를 입력하세요.\n"
+            "로컬 테스트 시에는 PC의 로컬 IP(예: 192.168.x.x)를,\n"
+            "인터넷 연결 시에는 EC2 공인 IP를 입력합니다.",
+            dialog
+        )
+        desc.setStyleSheet("color: #94a3b8; font-size: 10px; padding-bottom: 8px;")
+        desc.setWordWrap(True)
+        form.addRow(desc)
+
+        edt_host = QLineEdit(cfg["relay_host"], dialog)
+        edt_host.setPlaceholderText("예: 54.123.45.67 또는 127.0.0.1")
+        form.addRow("릴레이 서버 IP:", edt_host)
+
+        spn_port = QSpinBox(dialog)
+        spn_port.setRange(1, 65535)
+        spn_port.setValue(int(cfg["relay_port"]))
+        form.addRow("포트:", spn_port)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
+            Qt.Horizontal,
+            dialog
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec_() == QDialog.Accepted:
+            new_host = edt_host.text().strip()
+            new_port = spn_port.value()
+            if not new_host:
+                QMessageBox.warning(self, "입력 오류", "IP 주소를 입력하세요.")
+                return
+            app_config.save_config(new_host, new_port)
+            logger.info(f"릴레이 서버 설정 변경: {new_host}:{new_port}")
+            QMessageBox.information(
+                self,
+                "설정 저장 완료",
+                f"릴레이 서버 주소가 저장되었습니다:\n{new_host}:{new_port}\n\n"
+                "다음 연결 시도부터 적용됩니다."
+            )
+
     # History Logic
     def load_history(self):
         if os.path.exists(HISTORY_FILE):
@@ -365,17 +415,20 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error saving history: {e}")
 
-    def add_to_history(self, ip, port):
-        entry = f"{ip}:{port}"
-        if entry in self.history:
-            self.history.remove(entry)
-        self.history.insert(0, entry)
+    def add_to_history(self, connection_id):
+        if connection_id in self.history:
+            self.history.remove(connection_id)
+        self.history.insert(0, connection_id)
         self.history = self.history[:10]  # keep top 10
         self.save_history()
 
     # Host Action Handlers
     def append_server_log(self, message: str):
         logger.info(f"Server log: {message}")
+
+    def handle_server_id_received(self, session_id: str):
+        formatted_id = f"{session_id[:3]} {session_id[3:]}"
+        self.lbl_ip.setText(formatted_id)
 
     def toggle_server(self):
         """
@@ -393,9 +446,13 @@ class MainWindow(QMainWindow):
         scale = 1.0
         quality = 60
         fps = 30
-        port = 8080
-        
-        self.server.port = port
+
+        # 최신 설정을 매번 파일에서 읽어 적용
+        relay_host = app_config.get_relay_host()
+        relay_port = app_config.get_relay_port()
+
+        self.server.host = relay_host
+        self.server.port = relay_port
         self.server.update_settings(monitor_idx, scale, quality, fps)
         
         try:
@@ -409,6 +466,8 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(QSS_STYLESHEET)
         except Exception as e:
             QMessageBox.critical(self, "서버 오류", f"서버를 시작하지 못했습니다:\n{e}")
+            self.lbl_ip.setText("------")
+            
     async def stop_server_async(self):
         await self.server.stop()
         self.lbl_server_status.setText("서버 중지됨")
@@ -416,6 +475,7 @@ class MainWindow(QMainWindow):
         self.btn_toggle_server.setText("원격 도움 요청")
         self.btn_toggle_server.setObjectName("primaryButton")
         self.btn_toggle_server.setStyleSheet("")
+        self.lbl_ip.setText("------")
         self.setStyleSheet(QSS_STYLESHEET)
 
     # Client Action Handlers
@@ -424,19 +484,18 @@ class MainWindow(QMainWindow):
             asyncio.create_task(self.disconnect_client_async())
             return
             
-        ip = self.edt_client_ip.text().strip()
-        port = self.spn_client_port.value()
+        connection_id = self.edt_connection_id.text().strip().replace(" ", "")
         
-        if not ip:
-            QMessageBox.warning(self, "입력 오류", "올바른 원격 IP 주소를 입력하세요.")
+        if not connection_id or len(connection_id) != 6 or not connection_id.isdigit():
+            QMessageBox.warning(self, "입력 오류", "올바른 6자리 연결 ID를 입력하세요.")
             return
             
         self.btn_connect.setEnabled(False)
         self.btn_connect.setText("연결 시도 중...")
         
-        asyncio.create_task(self.connect_to_server_async(ip, port))
+        asyncio.create_task(self.connect_to_server_async(connection_id))
 
-    async def connect_to_server_async(self, ip: str, port: int):
+    async def connect_to_server_async(self, connection_id: str):
         try:
             # 콜백 먼저 등록 후 연결 (연결 직후 핸드셰이크 메시지 수신 대비)
             self.client.set_callbacks(
@@ -446,14 +505,17 @@ class MainWindow(QMainWindow):
             )
 
             # 뷰어에 연결 중 상태 표시
-            self.viewer.set_status_text(f"{ip}:{port} 에 연결 중...")
+            self.viewer.set_status_text(f"릴레이 서버를 통해 [{connection_id}] 에 연결 중...")
             self.viewer.current_pixmap = None
             self.viewer.update()
 
-            await self.client.connect(ip, port)
+            # 최신 릴레이 서버 설정 로드
+            relay_host = app_config.get_relay_host()
+            relay_port = app_config.get_relay_port()
+            await self.client.connect(relay_host, relay_port, session_id=connection_id)
 
             # Save to history on successful connection
-            self.add_to_history(ip, port)
+            self.add_to_history(connection_id)
 
             # Update connect button to show disconnect option
             self.btn_connect.setEnabled(True)
@@ -478,7 +540,7 @@ class MainWindow(QMainWindow):
             self.btn_connect.setObjectName("primaryButton")
             self.btn_connect.setStyleSheet("")
             self.setStyleSheet(QSS_STYLESHEET)
-            QMessageBox.critical(self, "연결 오류", f"{ip}:{port}에 연결할 수 없습니다.\n오류: {e}")
+            QMessageBox.critical(self, "연결 오류", f"ID [{connection_id}] 에 연결할 수 없습니다.\n오류: {e}")
 
     async def disconnect_client_async(self):
         await self.client.disconnect()

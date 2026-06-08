@@ -27,6 +27,12 @@ class RemoteControlServer:
         
         # Callback to update UI with client logs
         self.log_callback = None
+        
+        # AWS Relay client attributes
+        self.websocket = None
+        self.session_id = None
+        self.client_connected = False
+        self.id_callback = None
 
     def set_log_callback(self, callback):
         self.log_callback = callback
@@ -35,6 +41,9 @@ class RemoteControlServer:
         logger.info(message)
         if self.log_callback:
             self.log_callback(message)
+
+    def set_id_callback(self, callback):
+        self.id_callback = callback
 
     def update_settings(self, monitor_index: int, scale: float, quality: int, fps: int):
         self.monitor_index = monitor_index
@@ -48,33 +57,40 @@ class RemoteControlServer:
             return
         
         self.is_running = True
-        self.log_message(f"Starting server on {self.host}:{self.port}...")
+        self.log_message("AWS 릴레이 서버에 접속 중...")
+        
+        uri = f"ws://{self.host}:{self.port}/register"
         
         try:
-            self.server = await websockets.serve(
-                self.handler, 
-                self.host, 
-                self.port,
+            self.websocket = await websockets.connect(
+                uri,
                 ping_interval=15,
-                ping_timeout=30
+                ping_timeout=30,
+                max_size=10 * 1024 * 1024  # 10MB limit
             )
-            self.log_message("WebSocket Server running successfully.")
+            self.log_message("AWS 릴레이 서버 연결 성공. ID 발급 대기 중...")
             
-            # Start the screen streaming loop
+            # Start background tasks
+            self.recv_task = asyncio.create_task(self.receive_loop())
             self.stream_task = asyncio.create_task(self.screen_stream_loop())
         except Exception as e:
             self.is_running = False
-            self.log_message(f"Failed to start server: {e}")
+            if self.websocket:
+                await self.websocket.close()
+                self.websocket = None
+            self.log_message(f"릴레이 서버 접속 실패: {e}")
             raise e
 
     async def stop(self):
         if not self.is_running:
             return
         
-        self.log_message("Stopping server...")
+        self.log_message("원격 제어 호스트 연결 종료 중...")
         self.is_running = False
+        self.client_connected = False
+        self.session_id = None
         
-        # Cancel the stream task
+        # Cancel tasks
         if self.stream_task:
             self.stream_task.cancel()
             try:
@@ -83,42 +99,50 @@ class RemoteControlServer:
                 pass
             self.stream_task = None
             
-        # Close all active client connections
-        if self.active_connections:
-            connections_to_close = list(self.active_connections)
-            for conn in connections_to_close:
-                await conn.close()
-            self.active_connections.clear()
+        if hasattr(self, "recv_task") and self.recv_task:
+            self.recv_task.cancel()
+            try:
+                await self.recv_task
+            except asyncio.CancelledError:
+                pass
+            self.recv_task = None
             
-        # Close server
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            self.server = None
+        if self.websocket:
+            await self.websocket.close()
+            self.websocket = None
             
-        self.log_message("Server stopped.")
+        self.log_message("원격 제어 호스트 연결이 종료되었습니다.")
 
-    async def handler(self, websocket):
-        # Register connection
-        client_address = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-        self.log_message(f"Client connected: {client_address}")
-        self.active_connections.add(websocket)
-        
+    async def receive_loop(self):
         try:
-            # 1. Send Handshake
-            await websocket.send("device=windows")
-            
-            # 2. Handle incoming messages
-            async for message in websocket:
+            async for message in self.websocket:
                 if isinstance(message, str):
-                    self.parse_and_inject(message)
+                    logger.debug(f"Host received text message: {message}")
+                    if message.startswith("ID="):
+                        self.session_id = message.split("=")[1].strip()
+                        self.log_message(f"연결 ID가 발급되었습니다: {self.session_id}")
+                        if self.id_callback:
+                            self.id_callback(self.session_id)
+                    elif message == "CLIENT_CONNECTED":
+                        self.client_connected = True
+                        self.log_message("원격 도움 제공자(클라이언트)가 연결되었습니다.")
+                        # Send handshake back to the client via relay
+                        await self.websocket.send("device=windows")
+                    elif message == "CLIENT_DISCONNECTED":
+                        self.client_connected = False
+                        self.log_message("원격 도움 제공자(클라이언트)의 연결이 해제되었습니다.")
+                    else:
+                        self.parse_and_inject(message)
         except websockets.exceptions.ConnectionClosed:
-            self.log_message(f"Client disconnected: {client_address}")
+            self.log_message("릴레이 서버와의 연결이 비정상 종료되었습니다.")
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
-            logger.error(f"Error handling client {client_address}: {e}")
+            logger.error(f"Error in host receive loop: {e}")
+            self.log_message(f"수신 처리 오류: {e}")
         finally:
-            self.active_connections.remove(websocket)
-            self.log_message(f"Connection closed for: {client_address}")
+            # Clean up on disconnect
+            asyncio.create_task(self.stop())
 
     def parse_and_inject(self, text: str):
         """
@@ -199,18 +223,15 @@ class RemoteControlServer:
 
     async def screen_stream_loop(self):
         """
-        Continuously captures screen frames and broadcasts them to all connected clients.
-        Only performs capture and compression if there are active connections.
+        Continuously captures screen frames and sends them to the connected client.
         """
         while self.is_running:
-            if not self.active_connections:
+            if not (self.websocket and self.client_connected):
                 await asyncio.sleep(0.1)
                 continue
                 
             start_time = asyncio.get_event_loop().time()
             
-            # Capture and compress frame
-            # Run in executor to avoid blocking the main asyncio event loop
             try:
                 frame_bytes = await asyncio.get_event_loop().run_in_executor(
                     None,
@@ -220,10 +241,8 @@ class RemoteControlServer:
                     self.quality
                 )
                 
-                if frame_bytes and self.active_connections:
-                    # Broadcast to all clients
-                    # websockets.broadcast requires a list of connections
-                    websockets.broadcast(self.active_connections, frame_bytes)
+                if frame_bytes and self.websocket and self.client_connected:
+                    await self.websocket.send(frame_bytes)
             except Exception as e:
                 logger.error(f"Error in screen stream loop: {e}")
                 

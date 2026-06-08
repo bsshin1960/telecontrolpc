@@ -4,6 +4,14 @@ import logging
 from PyQt5.QtWidgets import QApplication
 from qasync import QEventLoop
 
+# Reconfigure stdout/stderr encoding on Windows to prevent UnicodeEncodeError in non-UTF-8 console (e.g. CP949)
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
+
 from gui.main_window import MainWindow
 
 # Configure logging

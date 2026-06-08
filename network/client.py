@@ -38,11 +38,15 @@ class RemoteControlClient:
         if self.status_callback:
             self.status_callback(message)
 
-    async def connect(self, host: str, port: int = 8080):
+    async def connect(self, host: str, port: int = 8080, session_id: str = ""):
         if self.is_connected:
             return
             
-        uri = f"ws://{host}:{port}/control"
+        if session_id:
+            uri = f"ws://{host}:{port}/join/{session_id}"
+        else:
+            uri = f"ws://{host}:{port}/control"
+            
         self.log_status(f"원격 호스트에 연결 시도 중 ({uri})...")
         
         try:
@@ -64,7 +68,10 @@ class RemoteControlClient:
             self.frame_count = 0
             self.byte_count = 0
             
-            self.log_status("원격 호스트에 성공적으로 연결되었습니다.")
+            if session_id:
+                self.log_status("릴레이 서버 접속 완료. 상대방 연결을 기다리는 중...")
+            else:
+                self.log_status("원격 호스트에 성공적으로 연결되었습니다.")
         except Exception as e:
             self.is_connected = False
             self.log_status(f"연결 실패: {e}")
@@ -130,7 +137,14 @@ class RemoteControlClient:
                 # Check for handshake
                 if isinstance(message, str):
                     logger.debug(f"Received text message: {message}")
-                    if "device=windows" in message:
+                    if message == "CONNECTED":
+                        self.log_status("원격 호스트와 연결되었습니다 (릴레이 서버 매칭 성공).")
+                        continue
+                    elif message == "HOST_DISCONNECTED":
+                        self.log_status("원격 호스트의 접속이 종료되었습니다.")
+                        asyncio.create_task(self.disconnect())
+                        continue
+                    elif "device=windows" in message:
                         self.is_windows_host = True
                         if hasattr(self, "trigger_task") and self.trigger_task:
                             self.trigger_task.cancel()
