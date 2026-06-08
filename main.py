@@ -19,11 +19,11 @@ logging.basicConfig(
 logger = logging.getLogger("ApplicationEntrypoint")
 
 def main():
-    logger.info("Initializing TeleControl PC Program...")
+    logger.info("Initializing TeleControl Program...")
     
     # 1. Create Qt Application
     app = QApplication(sys.argv)
-    app.setApplicationName("TeleControl PC")
+    app.setApplicationName("TeleControl")
     
     # 2. Integrate asyncio and Qt event loop using qasync
     loop = QEventLoop(app)
@@ -43,7 +43,7 @@ def main():
         except Exception as e:
             logger.error(f"Application crash: {e}")
         finally:
-            logger.info("Shutting down TeleControl PC Program.")
+            logger.info("Shutting down TeleControl Program.")
 
 if __name__ == "__main__":
     main()

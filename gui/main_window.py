@@ -39,7 +39,7 @@ def get_local_ip():
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TeleControl PC - 원격 데스크톱 제어")
+        self.setWindowTitle("TeleControl - 원격 데스크톱 제어")
         # Fit primary screen available geometry on startup
         screen = QApplication.primaryScreen()
         if screen:
@@ -65,8 +65,44 @@ class MainWindow(QMainWindow):
         # Set server log callback
         self.server.set_log_callback(self.append_server_log)
         
+        # Floating restore button for fullscreen mode
+        self.floating_restore_btn = QPushButton("전체 화면 종료 ✕", self)
+        self.floating_restore_btn.setObjectName("primaryButton")
+        self.floating_restore_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(30, 30, 46, 0.95);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                color: white;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: #ef4444;
+            }
+        """)
+        self.floating_restore_btn.setCursor(Qt.PointingHandCursor)
+        self.floating_restore_btn.clicked.connect(self.exit_fullscreen)
+        self.floating_restore_btn.hide()
+
         # Show maximized on startup
         self.showMaximized()
+
+    def show_floating_restore_menu(self):
+        if self.isFullScreen():
+            self.floating_restore_btn.show()
+            self.floating_restore_btn.raise_()
+        else:
+            self.floating_restore_btn.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "floating_restore_btn"):
+            btn_w = 120
+            btn_h = 28
+            x = (self.width() - btn_w) // 2
+            self.floating_restore_btn.setGeometry(x, 0, btn_w, btn_h)
 
     def init_ui(self):
         central_widget = QWidget(self)
@@ -74,46 +110,58 @@ class MainWindow(QMainWindow):
         
         # Main layout is vertical (top header bar + content area)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
         # 1. Top Header Bar
-        header_layout = QHBoxLayout()
+        self.header_widget = QWidget(self)
+        self.header_widget.setObjectName("headerWidget")
+        self.header_widget.setStyleSheet("background-color: #0d0d12;")
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(15, 10, 15, 5)
         header_layout.setSpacing(15)
         
-        lbl_main_title = QLabel("TeleControl PC", self)
-        lbl_main_title.setStyleSheet("font-size: 38px; font-weight: bold; color: white;")
+        lbl_main_title = QLabel("TeleControl", self.header_widget)
+        lbl_main_title.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
         header_layout.addWidget(lbl_main_title)
         
         header_layout.addStretch(1)
         
-        # Sidebar toggle button
-        self.btn_toggle_sidebar = QPushButton("◀ 설정 창 접기", self)
-        self.btn_toggle_sidebar.setCursor(Qt.PointingHandCursor)
-        self.btn_toggle_sidebar.setObjectName("backButton") # reuse style
-        self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
-        header_layout.addWidget(self.btn_toggle_sidebar)
+        # Full Screen button
+        self.btn_fullscreen = QPushButton("전체 화면", self.header_widget)
+        self.btn_fullscreen.setCursor(Qt.PointingHandCursor)
+        self.btn_fullscreen.setObjectName("fullscreenButton") # Using the 1.4x larger font style
+        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
+        header_layout.addWidget(self.btn_fullscreen)
         
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(self.header_widget)
         
-        # 2. Main Content Area (Splitter between Left Panel and Right Panel)
-        self.main_splitter = QSplitter(Qt.Horizontal, self)
-        self.main_splitter.setHandleWidth(8)
-        main_layout.addWidget(self.main_splitter)
+        # 2. Main Content Area (Remote Viewer only)
+        self.viewer = RemoteViewerWidget(self)
+        self.viewer.set_client(self.client)
+        main_layout.addWidget(self.viewer)
         
-        # 3. Left Panel (Settings)
-        self.left_panel = QFrame(self)
+        # 3. Left Panel (Settings) - parent is self.viewer to allow overlay
+        self.left_panel = QFrame(self.viewer)
         self.left_panel.setObjectName("cardFrame")
-        self.left_panel.setMinimumWidth(288)
-        self.left_panel.setMaximumWidth(432)
+        self.left_panel.setFixedWidth(150)
+        
+        # Prevent mouse/key/scroll events on settings panel from propagating to viewer
+        self.left_panel.mousePressEvent = lambda event: event.accept()
+        self.left_panel.mouseReleaseEvent = lambda event: event.accept()
+        self.left_panel.mouseMoveEvent = lambda event: event.accept()
+        self.left_panel.wheelEvent = lambda event: event.accept()
+        self.left_panel.keyPressEvent = lambda event: event.accept()
+        self.left_panel.keyReleaseEvent = lambda event: event.accept()
+        
         left_layout = QVBoxLayout(self.left_panel)
-        left_layout.setContentsMargins(10, 20, 10, 20)
-        left_layout.setSpacing(20)
+        left_layout.setContentsMargins(5, 8, 5, 8)
+        left_layout.setSpacing(10)
         
         # Mode Button 1: 도움 받기
         self.btn_menu_receive = QPushButton("도움 받기", self)
         self.btn_menu_receive.setCursor(Qt.PointingHandCursor)
-        self.btn_menu_receive.setFixedHeight(50)
+        self.btn_menu_receive.setFixedHeight(26)
         self.btn_menu_receive.setObjectName("btnHelpReceive")
         self.btn_menu_receive.clicked.connect(lambda: self.select_mode("host"))
         left_layout.addWidget(self.btn_menu_receive)
@@ -121,18 +169,18 @@ class MainWindow(QMainWindow):
         # Mode Button 2: 도움 주기
         self.btn_menu_give = QPushButton("도움 주기", self)
         self.btn_menu_give.setCursor(Qt.PointingHandCursor)
-        self.btn_menu_give.setFixedHeight(50)
+        self.btn_menu_give.setFixedHeight(26)
         self.btn_menu_give.setObjectName("btnHelpGive")
         self.btn_menu_give.clicked.connect(lambda: self.select_mode("client"))
         left_layout.addWidget(self.btn_menu_give)
         
         # Host Container 1 (displays below both buttons)
-        self.host_container = QWidget(self)
+        self.host_container = QWidget(self.left_panel)
         self.init_left_host_page()
         left_layout.addWidget(self.host_container)
         
         # Client Container 2 (displays below both buttons)
-        self.client_container = QWidget(self)
+        self.client_container = QWidget(self.left_panel)
         self.init_left_client_page()
         left_layout.addWidget(self.client_container)
         
@@ -147,15 +195,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         
-        self.main_splitter.addWidget(self.left_panel)
-        
-        # 4. Right Panel (Remote Viewer only)
-        self.viewer = RemoteViewerWidget(self)
-        self.viewer.set_client(self.client)
-        self.main_splitter.addWidget(self.viewer)
-        
-        # Set splitter default sizes: left panel 342px, right panel fills rest
-        self.main_splitter.setSizes([342, 800])
+        # Set layout on self.viewer to overlay left_panel on top
+        viewer_layout = QHBoxLayout(self.viewer)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_layout.setSpacing(0)
+        viewer_layout.addWidget(self.left_panel)
+        viewer_layout.addStretch(1)
         
         # On startup, only show the two buttons (hide both menus initially)
         self.host_container.setVisible(False)
@@ -163,147 +208,110 @@ class MainWindow(QMainWindow):
 
     def init_left_host_page(self):
         layout = QVBoxLayout(self.host_container)
-        layout.setContentsMargins(2, 15, 2, 15)
-        layout.setSpacing(25)
+        layout.setContentsMargins(2, 5, 2, 5)
+        layout.setSpacing(10)
         
         # Server Status Card
-        status_card = QFrame()
+        status_card = QFrame(self.host_container)
         status_card.setObjectName("statusCard")
-        status_layout = QHBoxLayout(status_card)
-        status_layout.setContentsMargins(12, 15, 12, 15)
-        status_layout.setSpacing(10)
+        status_layout = QVBoxLayout(status_card)
+        status_layout.setContentsMargins(5, 5, 5, 5)
+        status_layout.setSpacing(3)
         
-        status_title = QLabel("서버 상태", self)
-        status_title.setStyleSheet("font-weight: bold; color: #a855f7; font-size: 28px; background: transparent;")
+        status_title = QLabel("서버 상태", status_card)
+        status_title.setStyleSheet("font-weight: bold; color: #a855f7; font-size: 11px; background: transparent;")
         status_layout.addWidget(status_title)
         
-        status_layout.addStretch(1)
-        
-        self.lbl_server_status = QLabel("서버 중지됨", self)
-        self.lbl_server_status.setStyleSheet("color: #ef4444; background-color: #08080c; border: 2px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 8px 20px; font-size: 28px; font-weight: bold; min-height: 50px;")
-        self.lbl_server_status.setMinimumWidth(220)
+        self.lbl_server_status = QLabel("서버 중지됨", status_card)
+        self.lbl_server_status.setStyleSheet("color: #ef4444; background-color: #08080c; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 4px; font-size: 11px; font-weight: bold; min-height: 16px;")
         self.lbl_server_status.setAlignment(Qt.AlignCenter)
         status_layout.addWidget(self.lbl_server_status)
         
         layout.addWidget(status_card)
         
         # Host IP Card
-        ip_card = QFrame()
+        ip_card = QFrame(self.host_container)
         ip_card.setObjectName("statusCard")
-        ip_layout = QHBoxLayout(ip_card)
-        ip_layout.setContentsMargins(12, 15, 12, 15)
-        ip_layout.setSpacing(10)
+        ip_layout = QVBoxLayout(ip_card)
+        ip_layout.setContentsMargins(5, 5, 5, 5)
+        ip_layout.setSpacing(3)
         
-        ip_title = QLabel("내 주소", self)
-        ip_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 28px; background: transparent;")
+        ip_title = QLabel("내 주소", ip_card)
+        ip_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
         ip_layout.addWidget(ip_title)
         
-        ip_layout.addStretch(1)
-        
-        self.lbl_ip = QLabel(get_local_ip(), self)
+        self.lbl_ip = QLabel(get_local_ip(), ip_card)
         self.lbl_ip.setObjectName("ipLabel")
-        self.lbl_ip.setMinimumWidth(220)
         self.lbl_ip.setAlignment(Qt.AlignCenter)
         ip_layout.addWidget(self.lbl_ip)
         
         layout.addWidget(ip_card)
         
         # Start Server Button
-        self.btn_toggle_server = QPushButton("원격 도움 요청", self)
+        self.btn_toggle_server = QPushButton("원격 도움 요청", self.host_container)
         self.btn_toggle_server.setObjectName("primaryButton")
         self.btn_toggle_server.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_server.setFixedHeight(26)
         self.btn_toggle_server.clicked.connect(self.toggle_server)
         layout.addWidget(self.btn_toggle_server)
 
     def init_left_client_page(self):
         layout = QVBoxLayout(self.client_container)
-        layout.setContentsMargins(2, 15, 2, 15)
-        layout.setSpacing(25)
+        layout.setContentsMargins(2, 5, 2, 5)
+        layout.setSpacing(10)
         
         # Connection Form - IP Card
-        ip_frame = QFrame()
-        ip_frame.setObjectName("cardFrame")
-        ip_layout = QHBoxLayout(ip_frame)
-        ip_layout.setContentsMargins(12, 15, 12, 15)
-        ip_layout.setSpacing(10)
+        ip_frame = QFrame(self.client_container)
+        ip_frame.setObjectName("statusCard")
+        ip_layout = QVBoxLayout(ip_frame)
+        ip_layout.setContentsMargins(5, 5, 5, 5)
+        ip_layout.setSpacing(3)
         
-        lbl_ip_title = QLabel("원격 주소", self)
-        lbl_ip_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 28px; background: transparent;")
+        lbl_ip_title = QLabel("원격 주소", ip_frame)
+        lbl_ip_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
         
-        self.edt_client_ip = QLineEdit(self)
+        self.edt_client_ip = QLineEdit(ip_frame)
         self.edt_client_ip.setPlaceholderText("예: 192.168.0.15")
-        self.edt_client_ip.setMinimumWidth(220)
         self.edt_client_ip.setAlignment(Qt.AlignCenter)
         
         ip_layout.addWidget(lbl_ip_title)
-        ip_layout.addStretch(1)
         ip_layout.addWidget(self.edt_client_ip)
         layout.addWidget(ip_frame)
         
         # Connection Form - Port Card
-        port_frame = QFrame()
-        port_frame.setObjectName("cardFrame")
-        port_layout = QHBoxLayout(port_frame)
-        port_layout.setContentsMargins(12, 15, 12, 15)
-        port_layout.setSpacing(10)
+        port_frame = QFrame(self.client_container)
+        port_frame.setObjectName("statusCard")
+        port_layout = QVBoxLayout(port_frame)
+        port_layout.setContentsMargins(5, 5, 5, 5)
+        port_layout.setSpacing(3)
         
-        lbl_port_title = QLabel("원격 포트", self)
-        lbl_port_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 28px; background: transparent;")
+        lbl_port_title = QLabel("원격 포트", port_frame)
+        lbl_port_title.setStyleSheet("font-weight: bold; color: #818cf8; font-size: 11px; background: transparent;")
         
-        self.spn_client_port = QSpinBox(self)
+        self.spn_client_port = QSpinBox(port_frame)
         self.spn_client_port.setRange(1024, 65535)
         self.spn_client_port.setValue(8080)
-        self.spn_client_port.setMinimumWidth(220)
         self.spn_client_port.setAlignment(Qt.AlignCenter)
         
         port_layout.addWidget(lbl_port_title)
-        port_layout.addStretch(1)
         port_layout.addWidget(self.spn_client_port)
         layout.addWidget(port_frame)
         
         # Connect Button
-        self.btn_connect = QPushButton("연결", self)
+        self.btn_connect = QPushButton("연결", self.client_container)
         self.btn_connect.setObjectName("primaryButton")
         self.btn_connect.setCursor(Qt.PointingHandCursor)
+        self.btn_connect.setFixedHeight(26)
         self.btn_connect.clicked.connect(self.connect_to_server)
         layout.addWidget(self.btn_connect)
         
         # Client Status Label
-        self.lbl_client_status = QLabel("오프라인", self)
-        self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 18px; font-weight: bold;")
+        self.lbl_client_status = QLabel("오프라인", self.client_container)
+        self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold;")
         self.lbl_client_status.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_client_status)
         
-        # Android Navigation Bar (visible only when connected to Android)
-        self.android_nav_bar = QWidget(self)
-        nav_layout = QHBoxLayout(self.android_nav_bar)
-        nav_layout.setContentsMargins(0, 0, 0, 0)
-        nav_layout.setSpacing(10)
-        
-        self.btn_nav_back = QPushButton("뒤로", self)
-        self.btn_nav_back.setCursor(Qt.PointingHandCursor)
-        self.btn_nav_back.setFixedHeight(50)
-        self.btn_nav_back.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #3b82f6; color: white; border: none; border-radius: 12px;")
-        self.btn_nav_back.clicked.connect(lambda: self.client.send_command("NAV_BACK"))
-        
-        self.btn_nav_home = QPushButton("홈", self)
-        self.btn_nav_home.setCursor(Qt.PointingHandCursor)
-        self.btn_nav_home.setFixedHeight(50)
-        self.btn_nav_home.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #10b981; color: white; border: none; border-radius: 12px;")
-        self.btn_nav_home.clicked.connect(lambda: self.client.send_command("NAV_HOME"))
-        
-        self.btn_nav_recent = QPushButton("최근", self)
-        self.btn_nav_recent.setCursor(Qt.PointingHandCursor)
-        self.btn_nav_recent.setFixedHeight(50)
-        self.btn_nav_recent.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #8b5cf6; color: white; border: none; border-radius: 12px;")
-        self.btn_nav_recent.clicked.connect(lambda: self.client.send_command("NAV_RECENT"))
-        
-        nav_layout.addWidget(self.btn_nav_back)
-        nav_layout.addWidget(self.btn_nav_home)
-        nav_layout.addWidget(self.btn_nav_recent)
-        
-        self.android_nav_bar.setVisible(False)
-        layout.addWidget(self.android_nav_bar)
+
 
     def select_mode(self, mode: str):
         if mode == "host":
@@ -317,13 +325,28 @@ class MainWindow(QMainWindow):
             self.host_container.setVisible(False)
             self.client_container.setVisible(not is_visible)
 
-    def toggle_sidebar(self):
-        is_visible = self.left_panel.isVisible()
-        self.left_panel.setVisible(not is_visible)
-        if is_visible:
-            self.btn_toggle_sidebar.setText("▶ 설정 창 펴기")
+    def toggle_fullscreen(self):
+        if not self.isFullScreen():
+            self.enter_fullscreen()
         else:
-            self.btn_toggle_sidebar.setText("◀ 설정 창 접기")
+            self.exit_fullscreen()
+
+    def enter_fullscreen(self):
+        self.was_maximized = self.isMaximized()
+        self.header_widget.hide()
+        self.left_panel.hide()
+        self.showFullScreen()
+        self.is_fullscreen_mode = True
+
+    def exit_fullscreen(self):
+        self.header_widget.show()
+        self.left_panel.show()
+        if getattr(self, "was_maximized", True):
+            self.showMaximized()
+        else:
+            self.showNormal()
+        self.is_fullscreen_mode = False
+        self.floating_restore_btn.hide()
 
     # History Logic
     def load_history(self):
@@ -379,7 +402,7 @@ class MainWindow(QMainWindow):
             await self.server.start()
             
             self.lbl_server_status.setText("서버 실행 중")
-            self.lbl_server_status.setStyleSheet("color: #22c55e; background-color: #08080c; border: 2px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 8px 20px; font-size: 28px; font-weight: bold; min-height: 50px; qproperty-alignment: AlignCenter;")
+            self.lbl_server_status.setStyleSheet("color: #22c55e; background-color: #08080c; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 4px; font-size: 11px; font-weight: bold; min-height: 16px; qproperty-alignment: AlignCenter;")
             self.btn_toggle_server.setText("원격 도움 중지")
             self.btn_toggle_server.setObjectName("dangerButton")
             self.btn_toggle_server.setStyleSheet("")
@@ -389,7 +412,7 @@ class MainWindow(QMainWindow):
     async def stop_server_async(self):
         await self.server.stop()
         self.lbl_server_status.setText("서버 중지됨")
-        self.lbl_server_status.setStyleSheet("color: #ef4444; background-color: #08080c; border: 2px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 8px 20px; font-size: 28px; font-weight: bold; min-height: 50px; qproperty-alignment: AlignCenter;")
+        self.lbl_server_status.setStyleSheet("color: #ef4444; background-color: #08080c; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 4px; font-size: 11px; font-weight: bold; min-height: 16px; qproperty-alignment: AlignCenter;")
         self.btn_toggle_server.setText("원격 도움 요청")
         self.btn_toggle_server.setObjectName("primaryButton")
         self.btn_toggle_server.setStyleSheet("")
@@ -437,6 +460,7 @@ class MainWindow(QMainWindow):
             self.btn_connect.setText("연결 종료")
             self.btn_connect.setObjectName("dangerButton")
             self.btn_connect.setStyleSheet("")
+            self.btn_menu_receive.hide()
             self.setStyleSheet(QSS_STYLESHEET)
 
             # 뷰어 상태 텍스트 업데이트 (화면 스트림 대기 중)
@@ -467,19 +491,17 @@ class MainWindow(QMainWindow):
         host_type = "Windows PC" if self.client.is_windows_host else "안드로이드"
         stats_text = f"연결됨 ({host_type})"
         self.lbl_client_status.setText(stats_text)
-        self.android_nav_bar.setVisible(not self.client.is_windows_host)
 
     def handle_client_closed(self):
         self.btn_connect.setEnabled(True)
         self.btn_connect.setText("연결")
         self.btn_connect.setObjectName("primaryButton")
         self.btn_connect.setStyleSheet("")
+        self.btn_menu_receive.show()
         self.setStyleSheet(QSS_STYLESHEET)
 
         self.lbl_client_status.setText("오프라인")
-        self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold; margin-top: 5px;")
-        
-        self.android_nav_bar.setVisible(False)
+        self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold; margin-top: 2px;")
 
         self.client.set_callbacks(None, None, None)
 
@@ -488,18 +510,19 @@ class MainWindow(QMainWindow):
         self.viewer.set_status_text("원격 화면을 기다리는 중...")
 
         # 연결 해제 시 설정창 복원
-        self.left_panel.setVisible(True)
-        self.btn_toggle_sidebar.setText("◀ 설정 창 접기")
+        self.exit_fullscreen()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_F11 and self.client.is_connected:
-            is_fullscreen = getattr(self, "is_fullscreen_mode", False)
-            if not is_fullscreen:
-                self.showFullScreen()
-                self.is_fullscreen_mode = True
-            else:
-                self.showNormal()
-                self.is_fullscreen_mode = False
+        key = event.key()
+        modifiers = event.modifiers()
+        is_esc = (key == Qt.Key_Escape)
+        is_ctrl_c = (key == Qt.Key_C and (modifiers & Qt.ControlModifier))
+        
+        if self.isFullScreen() and (is_esc or is_ctrl_c):
+            self.exit_fullscreen()
+            event.accept()
+        elif event.key() == Qt.Key_F11 and self.client.is_connected:
+            self.toggle_fullscreen()
             event.accept()
         else:
             super().keyPressEvent(event)

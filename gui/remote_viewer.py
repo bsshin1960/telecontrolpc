@@ -115,35 +115,54 @@ class RemoteViewerWidget(QWidget):
         # Background fill
         painter.fillRect(self.rect(), QColor(10, 10, 18))
 
+        # Check if left settings panel is visible, to exclude it from drawing calculations
+        has_left_panel = False
+        panel_width = 0.0
+        for child in self.children():
+            if child.isWidgetType() and child.objectName() == "cardFrame" and child.isVisible():
+                has_left_panel = True
+                panel_width = float(child.width())
+                break
+
+        # User's specification:
+        # Left spacing = 10px, Right spacing = 10px, Right fixed margin = 300px
+        # On fullscreen/no panel: Left margin = 10px, Right margin = 10px
+        if has_left_panel:
+            left_margin = panel_width + 10.0
+            right_margin = 300.0 + 10.0
+        else:
+            left_margin = 10.0
+            right_margin = 10.0
+
         if self.current_pixmap and not self.current_pixmap.isNull():
-            # Calculate aspect ratio fit
-            view_w = float(self.width())
+            # Fit inside the available area while preserving aspect ratio
+            view_w = float(self.width()) - left_margin - right_margin
             view_h = float(self.height())
-            bmp_w = float(self.current_pixmap.width())
-            bmp_h = float(self.current_pixmap.height())
-
-            bmp_aspect = bmp_w / bmp_h
-            view_aspect = view_w / view_h
-
-            if bmp_aspect > view_aspect:
-                draw_w = view_w
-                draw_h = view_w / bmp_aspect
+            
+            pix_w = float(self.current_pixmap.width())
+            pix_h = float(self.current_pixmap.height())
+            
+            if pix_w > 0 and pix_h > 0:
+                scale = min(view_w / pix_w, view_h / pix_h)
+                new_w = pix_w * scale
+                new_h = pix_h * scale
+                
+                # Center the destination rectangle in the available width
+                x = left_margin + (view_w - new_w) / 2.0
+                y = (view_h - new_h) / 2.0
+                
+                self.dest_rect.setRect(x, y, new_w, new_h)
             else:
-                draw_h = view_h
-                draw_w = view_h * bmp_aspect
-
-            offset_x = (view_w - draw_w) / 2.0
-            offset_y = (view_h - draw_h) / 2.0
-
-            self.dest_rect.setRect(offset_x, offset_y, draw_w, draw_h)
+                self.dest_rect.setRect(left_margin, 0.0, view_w, view_h)
+                
             painter.drawPixmap(self.dest_rect, self.current_pixmap, QRectF(self.current_pixmap.rect()))
         else:
-            # Draw placeholder when no frame is available
-            self.dest_rect.setRect(0, 0, self.width(), self.height())
-
-            # Centered icon area
-            cx = self.width() / 2
-            cy = self.height() / 2
+            # Draw placeholder centered in the available area
+            view_w = float(self.width()) - left_margin - right_margin
+            cx = left_margin + view_w / 2.0
+            cy = self.height() / 2.0
+            
+            self.dest_rect.setRect(left_margin, 0.0, view_w, self.height())
 
             # Draw dashed border box
             painter.setPen(QColor(55, 65, 90))
@@ -163,8 +182,10 @@ class RemoteViewerWidget(QWidget):
             font = QFont("Segoe UI", 11)
             painter.setFont(font)
             painter.setPen(QColor(148, 163, 184))
+            
+            text_rect = self.rect().adjusted(int(left_margin), int(cy + 60) - self.height() // 2, -int(right_margin), 0)
             painter.drawText(
-                self.rect().adjusted(0, int(cy + 60) - self.height() // 2, 0, 0),
+                text_rect,
                 Qt.AlignHCenter | Qt.AlignTop,
                 self._status_text
             )
@@ -226,7 +247,19 @@ class RemoteViewerWidget(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        # Get local mouse position
+        y = event.y()
+        parent_win = self.window()
+        if parent_win and getattr(parent_win, "is_fullscreen_mode", False):
+            if y < 15: # top 15 pixels
+                if hasattr(parent_win, "show_floating_restore_menu"):
+                    parent_win.show_floating_restore_menu()
+            elif y > 50: # move below 50 pixels
+                if hasattr(parent_win, "floating_restore_btn"):
+                    parent_win.floating_restore_btn.hide()
+
         if not self.client or not self.client.is_connected:
+            event.accept()
             return
 
         is_windows = self.client.is_windows_host
@@ -250,6 +283,23 @@ class RemoteViewerWidget(QWidget):
             return
 
         key = event.key()
+        modifiers = event.modifiers()
+        
+        # Check if parent is in full screen mode, and if ESC or Ctrl+C is pressed, exit full screen!
+        parent_win = self.window()
+        is_fullscreen = False
+        if parent_win and hasattr(parent_win, "is_fullscreen_mode"):
+            is_fullscreen = parent_win.is_fullscreen_mode
+            
+        is_esc = (key == Qt.Key_Escape)
+        is_ctrl_c = (key == Qt.Key_C and (modifiers & Qt.ControlModifier))
+        
+        if is_fullscreen and (is_esc or is_ctrl_c):
+            if hasattr(parent_win, "exit_fullscreen"):
+                parent_win.exit_fullscreen()
+            event.accept()
+            return
+
         if key == Qt.Key_Escape:
             asyncio.create_task(self.client.disconnect())
             event.accept()

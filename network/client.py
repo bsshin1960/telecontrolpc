@@ -15,6 +15,7 @@ class RemoteControlClient:
         self.send_queue = asyncio.Queue()
         self.recv_task = None
         self.send_task = None
+        self.trigger_task = None
         
         # Callbacks
         self.frame_callback = None
@@ -57,6 +58,7 @@ class RemoteControlClient:
             # Start background tasks
             self.recv_task = asyncio.create_task(self.receive_loop())
             self.send_task = asyncio.create_task(self.send_loop())
+            self.trigger_task = asyncio.create_task(self.trigger_ready_loop())
             
             self.last_stats_time = time.time()
             self.frame_count = 0
@@ -92,6 +94,14 @@ class RemoteControlClient:
                 pass
             self.send_task = None
             
+        if hasattr(self, "trigger_task") and self.trigger_task:
+            self.trigger_task.cancel()
+            try:
+                await self.trigger_task
+            except asyncio.CancelledError:
+                pass
+            self.trigger_task = None
+            
         # Clear send queue
         while not self.send_queue.empty():
             try:
@@ -122,21 +132,44 @@ class RemoteControlClient:
                     logger.debug(f"Received text message: {message}")
                     if "device=windows" in message:
                         self.is_windows_host = True
+                        if hasattr(self, "trigger_task") and self.trigger_task:
+                            self.trigger_task.cancel()
+                            self.trigger_task = None
                         self.log_status("Windows 원격 호스트 감지: 확장 키보드/마우스 입력 기능이 활성화되었습니다.")
                         continue
                 
                 # Process message
                 if isinstance(message, bytes):
                     logger.debug(f"Received binary message: {len(message)} bytes")
-                    self.frame_count += 1
-                    self.byte_count += len(message)
-                    
-                    # Call frame callback to update the display
-                    if self.frame_callback:
-                        try:
-                            self.frame_callback(message)
-                        except Exception as cb_err:
-                            logger.error(f"Error calling frame callback: {cb_err}")
+                    if self.is_windows_host:
+                        if hasattr(self, "trigger_task") and self.trigger_task:
+                            self.trigger_task.cancel()
+                            self.trigger_task = None
+                        self.frame_count += 1
+                        self.byte_count += len(message)
+                        if self.frame_callback:
+                            try:
+                                self.frame_callback(message)
+                            except Exception as cb_err:
+                                logger.error(f"Error calling frame callback: {cb_err}")
+                    else:
+                        # Android host: first byte is frame type (0 = video, 1 = audio)
+                        if len(message) > 1:
+                            frame_type = message[0]
+                            if frame_type == 0:  # Video frame
+                                if hasattr(self, "trigger_task") and self.trigger_task:
+                                    self.trigger_task.cancel()
+                                    self.trigger_task = None
+                                self.frame_count += 1
+                                self.byte_count += len(message) - 1
+                                if self.frame_callback:
+                                    try:
+                                        self.frame_callback(message[1:])
+                                    except Exception as cb_err:
+                                        logger.error(f"Error calling frame callback: {cb_err}")
+                            elif frame_type == 1:  # Audio frame
+                                # Skip audio frames since video player doesn't handle them
+                                pass
                         
                 # Update statistics every second
                 delta = current_time - self.last_stats_time
@@ -252,3 +285,17 @@ class RemoteControlClient:
         escaped_text = text.replace(",", "\\,")
         cmd = f"action=char,text={escaped_text}"
         self.send_command(cmd)
+
+    async def trigger_ready_loop(self):
+        """
+        Periodically sends CLIENT_READY to Android host every 200ms
+        until the first video frame or handshake is received, prompting immediate redraw.
+        """
+        try:
+            while self.is_connected:
+                self.send_command("CLIENT_READY")
+                await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in trigger_ready_loop: {e}")
