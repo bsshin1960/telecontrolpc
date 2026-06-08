@@ -273,6 +273,37 @@ class MainWindow(QMainWindow):
         self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 18px; font-weight: bold;")
         self.lbl_client_status.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_client_status)
+        
+        # Android Navigation Bar (visible only when connected to Android)
+        self.android_nav_bar = QWidget(self)
+        nav_layout = QHBoxLayout(self.android_nav_bar)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(10)
+        
+        self.btn_nav_back = QPushButton("뒤로", self)
+        self.btn_nav_back.setCursor(Qt.PointingHandCursor)
+        self.btn_nav_back.setFixedHeight(50)
+        self.btn_nav_back.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #3b82f6; color: white; border: none; border-radius: 12px;")
+        self.btn_nav_back.clicked.connect(lambda: self.client.send_command("NAV_BACK"))
+        
+        self.btn_nav_home = QPushButton("홈", self)
+        self.btn_nav_home.setCursor(Qt.PointingHandCursor)
+        self.btn_nav_home.setFixedHeight(50)
+        self.btn_nav_home.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #10b981; color: white; border: none; border-radius: 12px;")
+        self.btn_nav_home.clicked.connect(lambda: self.client.send_command("NAV_HOME"))
+        
+        self.btn_nav_recent = QPushButton("최근", self)
+        self.btn_nav_recent.setCursor(Qt.PointingHandCursor)
+        self.btn_nav_recent.setFixedHeight(50)
+        self.btn_nav_recent.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #8b5cf6; color: white; border: none; border-radius: 12px;")
+        self.btn_nav_recent.clicked.connect(lambda: self.client.send_command("NAV_RECENT"))
+        
+        nav_layout.addWidget(self.btn_nav_back)
+        nav_layout.addWidget(self.btn_nav_home)
+        nav_layout.addWidget(self.btn_nav_recent)
+        
+        self.android_nav_bar.setVisible(False)
+        layout.addWidget(self.android_nav_bar)
 
     def select_mode(self, mode: str):
         if mode == "host":
@@ -436,6 +467,7 @@ class MainWindow(QMainWindow):
         host_type = "Windows PC" if self.client.is_windows_host else "안드로이드"
         stats_text = f"연결됨 ({host_type})"
         self.lbl_client_status.setText(stats_text)
+        self.android_nav_bar.setVisible(not self.client.is_windows_host)
 
     def handle_client_closed(self):
         self.btn_connect.setEnabled(True)
@@ -446,6 +478,8 @@ class MainWindow(QMainWindow):
 
         self.lbl_client_status.setText("오프라인")
         self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold; margin-top: 5px;")
+        
+        self.android_nav_bar.setVisible(False)
 
         self.client.set_callbacks(None, None, None)
 

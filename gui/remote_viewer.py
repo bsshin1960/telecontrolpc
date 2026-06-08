@@ -199,7 +199,8 @@ class RemoteViewerWidget(QWidget):
             self.is_left_clicked = True
             self.client.send_touch_event(0, x_ratio, y_ratio, "left")
         elif event.button() == Qt.RightButton:
-            self.client.send_extended_mouse_event("right_down", x_ratio, y_ratio)
+            if self.client.is_windows_host:
+                self.client.send_extended_mouse_event("right_down", x_ratio, y_ratio)
         elif event.button() == Qt.MidButton:
             self.client.send_extended_mouse_event("middle_down", x_ratio, y_ratio)
 
@@ -215,7 +216,10 @@ class RemoteViewerWidget(QWidget):
             self.is_left_clicked = False
             self.client.send_touch_event(1, x_ratio, y_ratio, "left")
         elif event.button() == Qt.RightButton:
-            self.client.send_extended_mouse_event("right_up", x_ratio, y_ratio)
+            if self.client.is_windows_host:
+                self.client.send_extended_mouse_event("right_up", x_ratio, y_ratio)
+            else:
+                self.client.send_command("NAV_BACK")
         elif event.button() == Qt.MidButton:
             self.client.send_extended_mouse_event("middle_up", x_ratio, y_ratio)
 
