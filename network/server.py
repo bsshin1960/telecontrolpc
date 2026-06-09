@@ -242,7 +242,8 @@ class RemoteControlServer:
                 )
                 
                 if frame_bytes and self.websocket and self.client_connected:
-                    await self.websocket.send(frame_bytes)
+                    # Android ClientActivity expects: first byte = 0 (video), rest = JPEG data
+                    await self.websocket.send(b'\x00' + frame_bytes)
             except Exception as e:
                 logger.error(f"Error in screen stream loop: {e}")
                 
