@@ -10,11 +10,23 @@ logger = logging.getLogger("RelayServer")
 sessions = {}
 
 async def register_host(websocket):
-    # Generate unique 6-digit ID
-    while True:
-        session_id = f"{random.randint(100000, 999999)}"
-        if session_id not in sessions:
-            break
+    # Use fixed 6-digit ID and override any existing session
+    session_id = "123456"
+    if session_id in sessions:
+        logger.info(f"Session ID {session_id} already exists. Disconnecting the old host and client.")
+        old_session = sessions.pop(session_id, None)
+        if old_session:
+            if old_session["host"]:
+                try:
+                    await old_session["host"].close()
+                except Exception:
+                    pass
+            if old_session["client"]:
+                try:
+                    await old_session["client"].send("HOST_DISCONNECTED")
+                    await old_session["client"].close()
+                except Exception:
+                    pass
             
     sessions[session_id] = {
         "host": websocket,

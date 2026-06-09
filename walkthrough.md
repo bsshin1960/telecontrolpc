@@ -38,6 +38,14 @@
 
 ---
 
+### 3. AWS Relay Server ID 고정 및 연결 안정화 (2026-06-10 추가)
+- **[aws_relay.py](file:///c:/Temp/Antigrvity/telecontrolpc/aws_relay.py)**
+  - 호스트 등록 시 항상 고정 연결 ID인 `"123456"`을 발급하도록 변경했습니다.
+  - 중복 접속(동일 ID 충돌) 발생 시, 기존 Host 및 Client의 연결을 강제로 안전하게 닫고 새로 유입된 Host의 세션을 등록할 수 있도록 예외처리 로직을 추가했습니다.
+  - 로컬 WebSocket 테스트 클라이언트를 구동하여 Host A 연결 -> Host B 접속(Host A 자동 세션 정리) -> Client 페어링 전 과정을 완벽히 검증했습니다.
+
+---
+
 ## 🎯 최종 빌드 산출물
 
 1. **Android 디버그 패키지**
