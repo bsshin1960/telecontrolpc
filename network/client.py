@@ -3,6 +3,13 @@ import websockets
 import logging
 import time
 
+try:
+    from PyQt5.QtMultimedia import QAudioOutput, QAudioFormat
+    HAS_AUDIO = True
+except ImportError:
+    HAS_AUDIO = False
+
+
 logger = logging.getLogger("WebSocketClient")
 
 class RemoteControlClient:
@@ -10,6 +17,10 @@ class RemoteControlClient:
         self.websocket = None
         self.is_connected = False
         self.is_windows_host = False
+        
+        # Audio properties
+        self.audio_output = None
+        self.audio_device = None
         
         # Queues and Tasks
         self.send_queue = asyncio.Queue()
@@ -87,6 +98,15 @@ class RemoteControlClient:
             
         self.log_status("연결 해제 중...")
         self.is_connected = False
+        
+        # Stop audio playback
+        if self.audio_output:
+            try:
+                self.audio_output.stop()
+            except Exception as e:
+                logger.error(f"Error stopping audio output: {e}")
+            self.audio_output = None
+        self.audio_device = None
         
         # Cancel tasks
         if self.recv_task:
@@ -190,8 +210,27 @@ class RemoteControlClient:
                                     except Exception as cb_err:
                                         logger.error(f"Error calling frame callback: {cb_err}")
                             elif frame_type == 1:  # Audio frame
-                                # Skip audio frames since video player doesn't handle them
-                                pass
+                                if HAS_AUDIO and len(message) > 1:
+                                    if self.audio_output is None:
+                                        try:
+                                            format = QAudioFormat()
+                                            format.setSampleRate(16000)
+                                            format.setChannelCount(1)
+                                            format.setSampleSize(16)
+                                            format.setCodec("audio/pcm")
+                                            format.setByteOrder(QAudioFormat.LittleEndian)
+                                            format.setSampleType(QAudioFormat.SignedInt)
+                                            self.audio_output = QAudioOutput(format)
+                                            self.audio_device = self.audio_output.start()
+                                            logger.info("PCM Audio Output started (16kHz, mono, 16bit)")
+                                        except Exception as ae:
+                                            logger.error(f"Error initializing QAudioOutput: {ae}")
+                                    
+                                    if self.audio_device:
+                                        try:
+                                            self.audio_device.write(message[1:])
+                                        except Exception as ae:
+                                            logger.error(f"Error writing to audio device: {ae}")
                         
                 # Update statistics every second
                 delta = current_time - self.last_stats_time
