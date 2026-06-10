@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QFrame, QSplitter, QApplication,
     QDialog, QDialogButtonBox, QFormLayout, QRadioButton
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 import config as app_config
@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         if app_config.get_auto_start():
             self.host_container.setVisible(True)
             self.client_container.setVisible(False)
-            self.toggle_server()
+            QTimer.singleShot(100, self.toggle_server)
 
     def show_floating_restore_menu(self):
         if self.isFullScreen():
