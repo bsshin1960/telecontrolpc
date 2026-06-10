@@ -320,6 +320,14 @@ class MainWindow(QMainWindow):
         self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold;")
         self.lbl_client_status.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_client_status)
+
+        # File Transfer Button
+        self.btn_file_transfer = QPushButton("파일 전송", self.client_container)
+        self.btn_file_transfer.setCursor(Qt.PointingHandCursor)
+        self.btn_file_transfer.setFixedHeight(26)
+        self.btn_file_transfer.clicked.connect(self.trigger_file_transfer)
+        self.btn_file_transfer.setEnabled(False)
+        layout.addWidget(self.btn_file_transfer)
         
 
 
@@ -536,6 +544,9 @@ class MainWindow(QMainWindow):
             # Save to history on successful connection
             self.add_to_history(connection_id)
 
+            # Enable file transfer button
+            self.btn_file_transfer.setEnabled(True)
+
             # Update connect button to show disconnect option
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("연결 종료")
@@ -554,6 +565,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.client.set_callbacks(None, None, None)
             self.viewer.set_status_text("원격 화면을 기다리는 중...")
+            self.btn_file_transfer.setEnabled(False)
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("연결")
             self.btn_connect.setObjectName("primaryButton")
@@ -585,6 +597,7 @@ class MainWindow(QMainWindow):
         self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold; margin-top: 2px;")
 
         self.client.set_callbacks(None, None, None)
+        self.btn_file_transfer.setEnabled(False)
 
         # 뷰어 초기화
         self.viewer.current_pixmap = None
@@ -592,6 +605,27 @@ class MainWindow(QMainWindow):
 
         # 연결 해제 시 설정창 복원
         self.exit_fullscreen()
+
+    def trigger_file_transfer(self):
+        downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+        try:
+            if not os.path.exists(downloads_path):
+                os.makedirs(downloads_path, exist_ok=True)
+            import platform
+            import subprocess
+            if platform.system() == "Windows":
+                os.startfile(downloads_path)
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", downloads_path])
+            else:
+                subprocess.Popen(["xdg-open", downloads_path])
+            logger.info("PC 다운로드 폴더를 열었습니다.")
+        except Exception as e:
+            logger.error(f"PC 다운로드 폴더 열기 실패: {e}")
+
+        if self.client.is_connected:
+            self.client.send_command("NAV_FILE_TRANSFER")
+            logger.info("원격 기기로 파일 전송 명령어(NAV_FILE_TRANSFER)를 전송했습니다.")
 
     def keyPressEvent(self, event):
         key = event.key()
