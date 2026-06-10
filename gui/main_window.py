@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox,
     QMessageBox, QFrame, QSplitter, QApplication,
-    QDialog, QDialogButtonBox, QFormLayout
+    QDialog, QDialogButtonBox, QFormLayout, QRadioButton
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -92,6 +92,12 @@ class MainWindow(QMainWindow):
 
         # Show maximized on startup
         self.showMaximized()
+
+        # Trigger auto start if enabled
+        if app_config.get_auto_start():
+            self.host_container.setVisible(True)
+            self.client_container.setVisible(False)
+            self.toggle_server()
 
     def show_floating_restore_menu(self):
         if self.isFullScreen():
@@ -257,13 +263,26 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(ip_card)
         
+        # Automatic Help Request option (QRadioButton)
+        self.chk_auto_start = QRadioButton("자동 도움 요청", self.host_container)
+        self.chk_auto_start.setAutoExclusive(False)  # Allows toggling on/off
+        self.chk_auto_start.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.chk_auto_start.setChecked(app_config.get_auto_start())
+        self.chk_auto_start.toggled.connect(self.handle_auto_start_toggled)
+        layout.addWidget(self.chk_auto_start)
+
         # Start Server Button
-        self.btn_toggle_server = QPushButton("원격 도움 요청", self.host_container)
+        self.btn_toggle_server = QPushButton("도움 요청", self.host_container)
         self.btn_toggle_server.setObjectName("primaryButton")
         self.btn_toggle_server.setCursor(Qt.PointingHandCursor)
         self.btn_toggle_server.setFixedHeight(26)
         self.btn_toggle_server.clicked.connect(self.toggle_server)
         layout.addWidget(self.btn_toggle_server)
+
+    def handle_auto_start_toggled(self, checked):
+        relay_host = app_config.get_relay_host()
+        relay_port = app_config.get_relay_port()
+        app_config.save_config(relay_host, relay_port, checked)
 
     def init_left_client_page(self):
         layout = QVBoxLayout(self.client_container)
@@ -460,7 +479,7 @@ class MainWindow(QMainWindow):
             
             self.lbl_server_status.setText("서버 실행 중")
             self.lbl_server_status.setStyleSheet("color: #22c55e; background-color: #08080c; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 4px; font-size: 11px; font-weight: bold; min-height: 16px; qproperty-alignment: AlignCenter;")
-            self.btn_toggle_server.setText("원격 도움 중지")
+            self.btn_toggle_server.setText("도움 중지")
             self.btn_toggle_server.setObjectName("dangerButton")
             self.btn_toggle_server.setStyleSheet("")
             self.setStyleSheet(QSS_STYLESHEET)
@@ -472,7 +491,7 @@ class MainWindow(QMainWindow):
         await self.server.stop()
         self.lbl_server_status.setText("서버 중지됨")
         self.lbl_server_status.setStyleSheet("color: #ef4444; background-color: #08080c; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 4px; font-size: 11px; font-weight: bold; min-height: 16px; qproperty-alignment: AlignCenter;")
-        self.btn_toggle_server.setText("원격 도움 요청")
+        self.btn_toggle_server.setText("도움 요청")
         self.btn_toggle_server.setObjectName("primaryButton")
         self.btn_toggle_server.setStyleSheet("")
         self.lbl_ip.setText("------")

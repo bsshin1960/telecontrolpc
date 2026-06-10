@@ -6,8 +6,9 @@ logger = logging.getLogger("Config")
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".telecontrol_config.json")
 
-DEFAULT_RELAY_HOST = "127.0.0.1"
+DEFAULT_RELAY_HOST = "54.242.81.228"
 DEFAULT_RELAY_PORT = 8080
+DEFAULT_AUTO_START = True
 
 
 def load_config() -> dict:
@@ -18,6 +19,7 @@ def load_config() -> dict:
     defaults = {
         "relay_host": DEFAULT_RELAY_HOST,
         "relay_port": DEFAULT_RELAY_PORT,
+        "auto_start": DEFAULT_AUTO_START,
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -30,18 +32,19 @@ def load_config() -> dict:
     return defaults
 
 
-def save_config(relay_host: str, relay_port: int):
+def save_config(relay_host: str, relay_port: int, auto_start: bool = True):
     """
     릴레이 서버 설정을 ~/.telecontrol_config.json 에 저장합니다.
     """
     data = {
         "relay_host": relay_host,
         "relay_port": relay_port,
+        "auto_start": auto_start,
     }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info(f"설정 저장 완료: {relay_host}:{relay_port}")
+        logger.info(f"설정 저장 완료: {relay_host}:{relay_port}, auto_start={auto_start}")
     except Exception as e:
         logger.error(f"설정 파일 저장 실패: {e}")
 
@@ -52,3 +55,7 @@ def get_relay_host() -> str:
 
 def get_relay_port() -> int:
     return int(load_config().get("relay_port", DEFAULT_RELAY_PORT))
+
+
+def get_auto_start() -> bool:
+    return bool(load_config().get("auto_start", DEFAULT_AUTO_START))
