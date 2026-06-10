@@ -622,7 +622,7 @@ class MainWindow(QMainWindow):
     def trigger_file_transfer(self):
         self.open_file_transfer_ui(remote_triggered=False)
 
-    def open_file_transfer_ui(self, remote_triggered=False, initial_remote_path="Pending..."):
+    def open_file_transfer_ui(self, remote_triggered=False, initial_remote_path="Pending...", silent=False):
         is_active = self.client.is_connected or (self.server.is_running and self.server.client_connected)
         if not is_active:
             QMessageBox.warning(self, "안내", "원격 연결이 수립된 후에 파일 전송 기능을 사용할 수 있습니다.")
@@ -632,7 +632,8 @@ class MainWindow(QMainWindow):
             if initial_remote_path != "Pending...":
                 self.file_transfer_dialog.remote_current_path = initial_remote_path
                 self.file_transfer_dialog.refresh_all()
-            self.file_transfer_dialog.raise_()
+            if not silent:
+                self.file_transfer_dialog.raise_()
             return
 
         from gui.file_transfer import FileTransferDialog
@@ -654,7 +655,8 @@ class MainWindow(QMainWindow):
             # 나의 초기 로컬 경로를 상대방에게 동봉해 UI 열림 전송
             self.send_fs_command(f"FS_OPEN_UI|{self.file_transfer_dialog.local_current_path}")
             
-        self.file_transfer_dialog.show()
+        if not silent:
+            self.file_transfer_dialog.show()
 
     def send_fs_command(self, cmd_str: str):
         if self.client.is_connected:
@@ -672,7 +674,9 @@ class MainWindow(QMainWindow):
                     initial_path = message.split("|", 1)[1]
                 except Exception:
                     pass
-            self.open_file_transfer_ui(remote_triggered=True, initial_remote_path=initial_path)
+            # Only show UI if PC is client (Help Give)
+            is_silent = not self.client.is_connected
+            self.open_file_transfer_ui(remote_triggered=True, initial_remote_path=initial_path, silent=is_silent)
             return
             
         if message == "FS_CLOSE_UI":
@@ -701,6 +705,24 @@ class MainWindow(QMainWindow):
                     self.file_transfer_dialog.handle_remote_file_received(filename, base64_data)
                 except Exception as e:
                     logger.error(f"Error saving received file: {e}")
+            elif message.startswith("FS_FILE_SEND_OK|"):
+                try:
+                    parts = message.split("|", 2)
+                    filename = parts[1]
+                    target_path = parts[2]
+                    self.file_transfer_dialog.lbl_status.setText(f"'{filename}' 전송 완료! (저장 위치: {target_path})")
+                    self.file_transfer_dialog.progress_bar.setVisible(False)
+                except Exception as e:
+                    logger.error(f"Error handling file send OK: {e}")
+            elif message.startswith("FS_FILE_SEND_ERR|"):
+                try:
+                    parts = message.split("|", 2)
+                    filename = parts[1]
+                    err = parts[2]
+                    self.file_transfer_dialog.lbl_status.setText(f"'{filename}' 전송 실패: {err}")
+                    self.file_transfer_dialog.progress_bar.setVisible(False)
+                except Exception as e:
+                    logger.error(f"Error handling file send ERR: {e}")
             elif message.startswith("FS_FILE_REQ|"):
                 try:
                     filename = message.split("|", 1)[1]

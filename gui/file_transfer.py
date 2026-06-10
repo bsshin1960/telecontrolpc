@@ -38,9 +38,8 @@ class FileTransferDialog(QDialog):
         self.setWindowTitle("파일 전송 탐색기 (File Transfer)")
         self.resize(1024, 720)
         
-        # 최소화/최대화 버튼 활성화 및 최대화 상태로 열기
+        # 최소화/최대화 버튼 활성화 (전체화면이 아닌 기본 크기로 열기)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
-        self.showMaximized()
         
         # 라이트 모드 테마 적용
         self.apply_light_theme()
@@ -468,12 +467,10 @@ class FileTransferDialog(QDialog):
             
             if self.send_cmd_fn:
                 self.send_cmd_fn(f"FS_FILE_SEND|{target_path}|{base64_data}")
-                self.lbl_status.setText(f"'{filename}' 전송 완료!")
         except Exception as e:
             logger.error(f"Failed to send file {filename}: {e}")
             QMessageBox.critical(self, "오류", f"파일 전송 실패: {e}")
             self.lbl_status.setText("파일 전송 실패")
-        finally:
             self.progress_bar.setVisible(False)
 
     def handle_remote_file_received(self, target_path, base64_data):
@@ -496,11 +493,17 @@ class FileTransferDialog(QDialog):
             with open(full_path, "wb") as f:
                 f.write(data)
                 
-            self.lbl_status.setText(f"'{filename}' 저장 완료!")
+            self.lbl_status.setText(f"'{filename}' 저장 완료! (저장 위치: {full_path})")
             self.refresh_local_list()
+            
+            # Send confirmation back to Android
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_SEND_OK|{filename}|{full_path}")
         except Exception as e:
             logger.error(f"Failed to save received file: {e}")
             self.lbl_status.setText("파일 저장 실패")
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_SEND_ERR|{filename}|{e}")
 
     def handle_remote_file_requested(self, requested_path):
         """
