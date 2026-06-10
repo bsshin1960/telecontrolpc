@@ -205,7 +205,6 @@ class MainWindow(QMainWindow):
         self.btn_file_transfer.setObjectName("btnFileTransfer")
         self.btn_file_transfer.setEnabled(False)
         self.btn_file_transfer.clicked.connect(self.trigger_file_transfer)
-        left_layout.addWidget(self.btn_file_transfer)
         
         # Host Container 1 (displays below both buttons)
         self.host_container = QWidget(self.left_panel)
@@ -337,6 +336,9 @@ class MainWindow(QMainWindow):
         self.lbl_client_status.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_client_status)
         
+        # Add file transfer button to client layout (giving help page only)
+        layout.addWidget(self.btn_file_transfer)
+        
 
 
     def select_mode(self, mode: str):
@@ -460,10 +462,7 @@ class MainWindow(QMainWindow):
     # Host Action Handlers
     def append_server_log(self, message: str):
         logger.info(f"Server log: {message}")
-        if "원격 도움 제공자(클라이언트)가 연결되었습니다" in message:
-            self.btn_file_transfer.setEnabled(True)
-        elif "원격 도움 제공자(클라이언트)의 연결이 해제되었습니다" in message or "원격 제어 호스트 연결이 종료되었습니다" in message:
-            self.btn_file_transfer.setEnabled(False)
+        if "원격 도움 제공자(클라이언트)의 연결이 해제되었습니다" in message or "원격 제어 호스트 연결이 종료되었습니다" in message:
             if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
                 self.file_transfer_dialog.close()
                 self.file_transfer_dialog = None
