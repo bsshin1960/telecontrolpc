@@ -567,7 +567,6 @@ class MainWindow(QMainWindow):
             self.btn_connect.setText("연결 종료")
             self.btn_connect.setObjectName("dangerButton")
             self.btn_connect.setStyleSheet("")
-            self.btn_menu_receive.hide()
             self.setStyleSheet(QSS_STYLESHEET)
 
             # 뷰어 상태 텍스트 업데이트 (화면 스트림 대기 중)
@@ -673,7 +672,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
             if message.startswith("FS_LIST_RESP|"):
                 try:
-                    json_str = message.split("|", 1)[1]
+                    parts = message.split("|", 2)
+                    remote_rel = parts[1]
+                    json_str = parts[2]
+                    self.file_transfer_dialog.remote_rel_path = remote_rel
                     files = json.loads(json_str)
                     self.file_transfer_dialog.update_remote_file_list(files)
                 except Exception as e:
