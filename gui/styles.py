@@ -354,6 +354,27 @@ QPushButton#btnHelpGive:pressed {
     background-color: #14532d;
 }
 
+QPushButton#btnFileTransfer {
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 11px;
+    min-height: 24px;
+}
+QPushButton#btnFileTransfer:hover {
+    background-color: #1d4ed8;
+}
+QPushButton#btnFileTransfer:pressed {
+    background-color: #1e40af;
+}
+QPushButton#btnFileTransfer:disabled {
+    background-color: #1e1e2f;
+    color: #64748b;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 /* Back Button */
 QPushButton#backButton {
     background-color: #1e1e2f;

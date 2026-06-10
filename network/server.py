@@ -33,6 +33,7 @@ class RemoteControlServer:
         self.session_id = None
         self.client_connected = False
         self.id_callback = None
+        self.file_callback = None
 
     def set_log_callback(self, callback):
         self.log_callback = callback
@@ -44,6 +45,13 @@ class RemoteControlServer:
 
     def set_id_callback(self, callback):
         self.id_callback = callback
+
+    def set_file_callback(self, callback):
+        self.file_callback = callback
+
+    def send_command(self, cmd_str: str):
+        if self.websocket and self.client_connected:
+            asyncio.create_task(self.websocket.send(cmd_str))
 
     def update_settings(self, monitor_index: int, scale: float, quality: int, fps: int):
         self.monitor_index = monitor_index
@@ -131,6 +139,9 @@ class RemoteControlServer:
                     elif message == "CLIENT_DISCONNECTED":
                         self.client_connected = False
                         self.log_message("원격 도움 제공자(클라이언트)의 연결이 해제되었습니다.")
+                    elif message.startswith("FS_"):
+                        if self.file_callback:
+                            self.file_callback(message)
                     else:
                         self.parse_and_inject(message)
         except websockets.exceptions.ConnectionClosed:

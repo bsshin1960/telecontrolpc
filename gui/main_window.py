@@ -62,12 +62,19 @@ class MainWindow(QMainWindow):
         # Connection History
         self.history = self.load_history()
         
+        # File transfer dialog reference
+        self.file_transfer_dialog = None
+        
         # GUI Layout Setup
         self.init_ui()
         
         # Set server log callback
         self.server.set_log_callback(self.append_server_log)
         self.server.set_id_callback(self.handle_server_id_received)
+        
+        # Route file commands
+        self.server.set_file_callback(self.handle_file_message)
+        self.client.set_file_callback(self.handle_file_message)
         
         # Floating restore button for fullscreen mode
         self.floating_restore_btn = QPushButton("전체 화면 종료 ✕", self)
@@ -190,6 +197,15 @@ class MainWindow(QMainWindow):
         self.btn_menu_give.setObjectName("btnHelpGive")
         self.btn_menu_give.clicked.connect(lambda: self.select_mode("client"))
         left_layout.addWidget(self.btn_menu_give)
+        
+        # File Transfer Button (Main Menu style, Blue Accent)
+        self.btn_file_transfer = QPushButton("파일 전송", self)
+        self.btn_file_transfer.setCursor(Qt.PointingHandCursor)
+        self.btn_file_transfer.setFixedHeight(26)
+        self.btn_file_transfer.setObjectName("btnFileTransfer")
+        self.btn_file_transfer.setEnabled(False)
+        self.btn_file_transfer.clicked.connect(self.trigger_file_transfer)
+        left_layout.addWidget(self.btn_file_transfer)
         
         # Host Container 1 (displays below both buttons)
         self.host_container = QWidget(self.left_panel)
@@ -320,14 +336,6 @@ class MainWindow(QMainWindow):
         self.lbl_client_status.setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold;")
         self.lbl_client_status.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_client_status)
-
-        # File Transfer Button
-        self.btn_file_transfer = QPushButton("파일 전송", self.client_container)
-        self.btn_file_transfer.setCursor(Qt.PointingHandCursor)
-        self.btn_file_transfer.setFixedHeight(26)
-        self.btn_file_transfer.clicked.connect(self.trigger_file_transfer)
-        self.btn_file_transfer.setEnabled(False)
-        layout.addWidget(self.btn_file_transfer)
         
 
 
@@ -452,6 +460,13 @@ class MainWindow(QMainWindow):
     # Host Action Handlers
     def append_server_log(self, message: str):
         logger.info(f"Server log: {message}")
+        if "원격 도움 제공자(클라이언트)가 연결되었습니다" in message:
+            self.btn_file_transfer.setEnabled(True)
+        elif "원격 도움 제공자(클라이언트)의 연결이 해제되었습니다" in message or "원격 제어 호스트 연결이 종료되었습니다" in message:
+            self.btn_file_transfer.setEnabled(False)
+            if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
+                self.file_transfer_dialog.close()
+                self.file_transfer_dialog = None
 
     def handle_server_id_received(self, session_id: str):
         formatted_id = f"{session_id[:3]} {session_id[3:]}"
@@ -607,25 +622,76 @@ class MainWindow(QMainWindow):
         self.exit_fullscreen()
 
     def trigger_file_transfer(self):
-        downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
-        try:
-            if not os.path.exists(downloads_path):
-                os.makedirs(downloads_path, exist_ok=True)
-            import platform
-            import subprocess
-            if platform.system() == "Windows":
-                os.startfile(downloads_path)
-            elif platform.system() == "Darwin":
-                subprocess.Popen(["open", downloads_path])
-            else:
-                subprocess.Popen(["xdg-open", downloads_path])
-            logger.info("PC 다운로드 폴더를 열었습니다.")
-        except Exception as e:
-            logger.error(f"PC 다운로드 폴더 열기 실패: {e}")
+        self.open_file_transfer_ui(remote_triggered=False)
 
+    def open_file_transfer_ui(self, remote_triggered=False):
+        is_active = self.client.is_connected or (self.server.is_running and self.server.client_connected)
+        if not is_active:
+            QMessageBox.warning(self, "안내", "원격 연결이 수립된 후에 파일 전송 기능을 사용할 수 있습니다.")
+            return
+
+        if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
+            self.file_transfer_dialog.raise_()
+            return
+
+        from gui.file_transfer import FileTransferDialog
+        is_client_mode = self.client.is_connected
+        
+        send_fn = None
         if self.client.is_connected:
-            self.client.send_command("NAV_FILE_TRANSFER")
-            logger.info("원격 기기로 파일 전송 명령어(NAV_FILE_TRANSFER)를 전송했습니다.")
+            send_fn = self.client.send_command
+        elif self.server.is_running:
+            send_fn = self.server.send_command
+            
+        self.file_transfer_dialog = FileTransferDialog(self, is_client=is_client_mode, send_cmd_fn=send_fn)
+        
+        if not remote_triggered:
+            self.send_fs_command("FS_OPEN_UI")
+            
+        self.file_transfer_dialog.show()
+
+    def send_fs_command(self, cmd_str: str):
+        if self.client.is_connected:
+            self.client.send_command(cmd_str)
+        elif self.server.is_running and self.server.client_connected:
+            self.server.send_command(cmd_str)
+
+    def handle_file_message(self, message: str):
+        logger.info(f"Received file system command: {message[:100]}")
+        
+        if message == "FS_OPEN_UI":
+            self.open_file_transfer_ui(remote_triggered=True)
+            return
+            
+        if message == "FS_CLOSE_UI":
+            if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
+                dialog = self.file_transfer_dialog
+                self.file_transfer_dialog = None
+                dialog.close()
+            return
+
+        if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
+            if message.startswith("FS_LIST_RESP|"):
+                try:
+                    json_str = message.split("|", 1)[1]
+                    files = json.loads(json_str)
+                    self.file_transfer_dialog.update_remote_file_list(files)
+                except Exception as e:
+                    logger.error(f"Error parsing file list: {e}")
+            elif message.startswith("FS_FILE_SEND|"):
+                try:
+                    parts = message.split("|", 2)
+                    filename = parts[1]
+                    base64_data = parts[2]
+                    self.file_transfer_dialog.handle_remote_file_received(filename, base64_data)
+                except Exception as e:
+                    logger.error(f"Error saving received file: {e}")
+            elif message.startswith("FS_FILE_REQ|"):
+                try:
+                    filename = message.split("|", 1)[1]
+                    self.file_transfer_dialog.handle_remote_file_requested(filename)
+                except Exception as e:
+                    logger.error(f"Error handling file request: {e}")
 
     def keyPressEvent(self, event):
         key = event.key()

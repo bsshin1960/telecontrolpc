@@ -21,6 +21,7 @@ class RemoteControlClient:
         self.frame_callback = None
         self.status_callback = None
         self.stats_callback = None
+        self.file_callback = None
         
         # Statistics
         self.frame_count = 0
@@ -32,6 +33,9 @@ class RemoteControlClient:
         self.frame_callback = frame_cb
         self.status_callback = status_cb
         self.stats_callback = stats_cb
+
+    def set_file_callback(self, cb):
+        self.file_callback = cb
 
     def log_status(self, message: str):
         logger.info(message)
@@ -137,6 +141,10 @@ class RemoteControlClient:
                 # Check for handshake
                 if isinstance(message, str):
                     logger.debug(f"Received text message: {message}")
+                    if message.startswith("FS_"):
+                        if self.file_callback:
+                            self.file_callback(message)
+                        continue
                     if message == "CONNECTED":
                         self.log_status("원격 호스트와 연결되었습니다 (릴레이 서버 매칭 성공).")
                         continue
