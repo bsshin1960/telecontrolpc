@@ -2,6 +2,7 @@ import os
 import base64
 import json
 import logging
+import string
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
     QListWidget, QPushButton, QLabel, QProgressBar,
@@ -11,6 +12,17 @@ from PyQt5.QtCore import Qt
 
 logger = logging.getLogger("FileTransferDialog")
 
+def get_drives():
+    """
+    윈도우 시스템에 존재하는 드라이브 문자 리스트를 반환합니다.
+    """
+    drives = []
+    for letter in string.ascii_uppercase:
+        drive = f"{letter}:\\"
+        if os.path.exists(drive):
+            drives.append(drive)
+    return drives
+
 class FileTransferDialog(QDialog):
     def __init__(self, parent=None, is_client=True, send_cmd_fn=None):
         super().__init__(parent)
@@ -18,17 +30,19 @@ class FileTransferDialog(QDialog):
         self.send_cmd_fn = send_cmd_fn
         
         self.downloads_path = os.path.normpath(os.path.join(os.path.expanduser("~"), "Downloads"))
-        if not os.path.exists(self.downloads_path):
-            os.makedirs(self.downloads_path, exist_ok=True)
-            
-        # 탐색할 상대 경로 추적 (Downloads 기준 상대 경로, 비어 있으면 Downloads 루트)
-        self.local_rel_path = ""
-        self.remote_rel_path = ""
+        
+        # 탐색할 절대 경로 추적 (기본 시작은 Downloads 폴더)
+        self.local_current_path = self.downloads_path
+        self.remote_current_path = "Pending..."  # 스마트폰이 준비 완료되면 초기 경로를 전달받음
             
         self.setWindowTitle("파일 전송 탐색기 (File Transfer)")
-        self.resize(800, 520)
+        self.resize(1024, 720)
         
-        # 라이트 모드 (흰 바탕, 검정 글씨) 스타일 적용
+        # 최소화/최대화 버튼 활성화 및 최대화 상태로 열기
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
+        self.showMaximized()
+        
+        # 라이트 모드 테마 적용
         self.apply_light_theme()
         
         self.init_ui()
@@ -112,8 +126,8 @@ class FileTransferDialog(QDialog):
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
         
         # Top Header Area
         header_layout = QHBoxLayout()
@@ -133,7 +147,7 @@ class FileTransferDialog(QDialog):
         left_widget.setObjectName("cardFrame")
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(10, 10, 10, 10)
-        left_layout.setSpacing(8)
+        left_layout.setSpacing(6)
         
         # Left Title & Path Info
         left_title_text = "도움 받기 (원격 스마트폰)" if self.is_client else "도움 받기 (로컬 PC)"
@@ -141,13 +155,13 @@ class FileTransferDialog(QDialog):
         lbl_left_title.setStyleSheet("font-weight: bold; color: #4f46e5; font-size: 12px;")
         left_layout.addWidget(lbl_left_title)
         
-        self.lbl_left_path = QLabel("경로: Downloads", left_widget)
-        self.lbl_left_path.setStyleSheet("color: #64748b; font-size: 10px;")
+        self.lbl_left_path = QLabel("경로: Loading...", left_widget)
+        self.lbl_left_path.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
         left_layout.addWidget(self.lbl_left_path)
         
         # Left List
         self.list_left = QListWidget(left_widget)
-        left_layout.addWidget(self.list_left)
+        left_layout.addWidget(self.list_left, 1) # stretch 1 to fill layout vertically
         
         # Left Button (Send left -> right)
         self.btn_left_to_right = QPushButton("오른쪽으로 전송 (도움 주기로) ➔", left_widget)
@@ -161,7 +175,7 @@ class FileTransferDialog(QDialog):
         right_widget.setObjectName("cardFrame")
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(10, 10, 10, 10)
-        right_layout.setSpacing(8)
+        right_layout.setSpacing(6)
         
         # Right Title & Path Info
         right_title_text = "도움 주기 (로컬 PC)" if self.is_client else "도움 주기 (원격 스마트폰)"
@@ -169,13 +183,13 @@ class FileTransferDialog(QDialog):
         lbl_right_title.setStyleSheet("font-weight: bold; color: #10b981; font-size: 12px;")
         right_layout.addWidget(lbl_right_title)
         
-        self.lbl_right_path = QLabel("경로: Downloads", right_widget)
-        self.lbl_right_path.setStyleSheet("color: #64748b; font-size: 10px;")
+        self.lbl_right_path = QLabel("경로: Loading...", right_widget)
+        self.lbl_right_path.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
         right_layout.addWidget(self.lbl_right_path)
         
         # Right List
         self.list_right = QListWidget(right_widget)
-        right_layout.addWidget(self.list_right)
+        right_layout.addWidget(self.list_right, 1) # stretch 1 to fill layout vertically
         
         # Right Button (Send right -> left)
         self.btn_right_to_left = QPushButton("⬅ 왼쪽으로 전송 (도움 받기로)", right_widget)
@@ -186,13 +200,13 @@ class FileTransferDialog(QDialog):
         # Add to splitter
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(splitter, 1) # stretch 1 to fill main layout vertically
         
         # Double Click Events for Folder Navigation
         self.list_left.itemDoubleClicked.connect(self.on_left_double_click)
         self.list_right.itemDoubleClicked.connect(self.on_right_double_click)
         
-        # Bottom Progress & Control Bar
+        # Bottom Progress Bar
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setVisible(False)
         self.progress_bar.setFixedHeight(10)
@@ -209,51 +223,61 @@ class FileTransferDialog(QDialog):
         list_widget = self.list_right if self.is_client else self.list_left
         path_label = self.lbl_right_path if self.is_client else self.lbl_left_path
         
-        # 절대경로 확인 및 상위 탈출 차단
-        current_rel = self.local_rel_path
-        abs_path = os.path.normpath(os.path.join(self.downloads_path, current_rel))
-        if not abs_path.startswith(self.downloads_path):
-            abs_path = self.downloads_path
-            self.local_rel_path = ""
-            current_rel = ""
-            
-        path_label.setText(f"경로: Downloads/{current_rel}" if current_rel else "경로: Downloads")
         list_widget.clear()
         
+        if self.local_current_path == "My PC":
+            path_label.setText("경로: 내 PC (My PC)")
+            try:
+                drives = get_drives()
+                for d in drives:
+                    item = QListWidgetItem(f"📁 {d}")
+                    item.setData(Qt.UserRole, {"name": d, "is_dir": True, "is_drive": True})
+                    list_widget.addItem(item)
+            except Exception as e:
+                logger.error(f"Failed to load drives: {e}")
+            return
+
+        # 절대경로 갱신 및 검증
+        self.local_current_path = os.path.normpath(self.local_current_path)
+        path_label.setText(f"경로: {self.local_current_path}")
+        
         # 상위 폴더 바로가기 추가
-        if current_rel:
-            item = QListWidgetItem("📁 .. (상위 폴더)")
-            item.setData(Qt.UserRole, {"name": "..", "is_dir": True})
-            list_widget.addItem(item)
+        item = QListWidgetItem("📁 .. (상위 폴더)")
+        item.setData(Qt.UserRole, {"name": "..", "is_dir": True})
+        list_widget.addItem(item)
             
         try:
-            items = os.listdir(abs_path)
-            # 폴더와 파일 분리 정렬
+            items = os.listdir(self.local_current_path)
             dirs = []
             files = []
             for item_name in items:
-                full_path = os.path.join(abs_path, item_name)
-                if os.path.isdir(full_path):
-                    dirs.append(item_name)
-                else:
-                    files.append(item_name)
+                try:
+                    full_path = os.path.join(self.local_current_path, item_name)
+                    if os.path.isdir(full_path):
+                        dirs.append(item_name)
+                    else:
+                        files.append(item_name)
+                except Exception:
+                    # 권한 문제 등의 파일은 스킵
+                    pass
                     
             dirs.sort()
             files.sort()
             
-            # 폴더 추가
             for d in dirs:
                 item = QListWidgetItem(f"📁 {d}")
                 item.setData(Qt.UserRole, {"name": d, "is_dir": True})
                 list_widget.addItem(item)
                 
-            # 파일 추가
             for f in files:
-                full_path = os.path.join(abs_path, f)
-                size_kb = os.path.getsize(full_path) / 1024.0
-                item = QListWidgetItem(f"📄 {f} ({size_kb:.1f} KB)")
-                item.setData(Qt.UserRole, {"name": f, "is_dir": False})
-                list_widget.addItem(item)
+                full_path = os.path.join(self.local_current_path, f)
+                try:
+                    size_kb = os.path.getsize(full_path) / 1024.0
+                    item = QListWidgetItem(f"📄 {f} ({size_kb:.1f} KB)")
+                    item.setData(Qt.UserRole, {"name": f, "is_dir": False})
+                    list_widget.addItem(item)
+                except Exception:
+                    pass
                 
         except Exception as e:
             logger.error(f"Failed to refresh local file list: {e}")
@@ -261,32 +285,31 @@ class FileTransferDialog(QDialog):
 
     def request_remote_list(self):
         """
-        원격 기기의 지정된 상대 경로 목록을 요청합니다.
+        원격 기기의 지정된 절대 경로 목록을 요청합니다.
         """
         self.lbl_status.setText("원격 기기의 파일 목록 불러오는 중...")
+        req_path = self.remote_current_path if self.remote_current_path != "Pending..." else ""
         if self.send_cmd_fn:
-            self.send_cmd_fn(f"FS_LIST_REQ|{self.remote_rel_path}")
+            self.send_cmd_fn(f"FS_LIST_REQ|{req_path}")
 
     def update_remote_file_list(self, files):
         """
-        원격 기기로부터 목록 수신 시 UI를 업데이트합니다 (FS_LIST_RESP 수신 시 호출).
+        원격 기기로부터 목록 수신 시 UI를 업데이트합니다.
         """
         list_widget = self.list_left if self.is_client else self.list_right
         path_label = self.lbl_left_path if self.is_client else self.lbl_right_path
         
-        current_rel = self.remote_rel_path
-        path_label.setText(f"경로: Downloads/{current_rel}" if current_rel else "경로: Downloads")
+        path_label.setText(f"경로: {self.remote_current_path}")
         list_widget.clear()
         
-        # 상위 폴더 바로가기 추가
-        if current_rel:
+        # 안드로이드 최상위 내부 저장소 루트가 아니면 상위 폴더 추가
+        # 보통 안드로이드 내부저장소 루트는 '/storage/emulated/0'
+        if self.remote_current_path != "/storage/emulated/0" and self.remote_current_path != "/":
             item = QListWidgetItem("📁 .. (상위 폴더)")
             item.setData(Qt.UserRole, {"name": "..", "is_dir": True})
             list_widget.addItem(item)
             
         try:
-            # files: [{"name": "", "is_dir": bool, "size": int}]
-            # 폴더와 파일 정렬
             dirs = [f for f in files if f.get("is_dir", False)]
             file_items = [f for f in files if not f.get("is_dir", False)]
             
@@ -321,7 +344,7 @@ class FileTransferDialog(QDialog):
     def handle_double_click(self, item, is_left):
         data = item.data(Qt.UserRole)
         if not data or not data.get("is_dir", False):
-            return  # 파일은 더블클릭해도 아무 작업 안함
+            return
             
         name = data.get("name", "")
         
@@ -329,28 +352,39 @@ class FileTransferDialog(QDialog):
         is_local_pane = (not self.is_client) if is_left else self.is_client
         
         if is_local_pane:
-            # 로컬 경로 변경
-            if name == "..":
-                parts = self.local_rel_path.replace("\\", "/").strip("/").split("/")
-                self.local_rel_path = "/".join(parts[:-1]) if len(parts) > 1 else ""
+            if self.local_current_path == "My PC":
+                # 드라이브 선택 진입
+                self.local_current_path = name
             else:
-                self.local_rel_path = f"{self.local_rel_path}/{name}".strip("/")
+                if name == "..":
+                    parent = os.path.dirname(self.local_current_path)
+                    # 만약 현재 경로가 드라이브 루트(예: C:\)인 상태에서 ..을 누르면 My PC로 이동
+                    if parent == self.local_current_path or len(self.local_current_path) <= 3:
+                        self.local_current_path = "My PC"
+                    else:
+                        self.local_current_path = parent
+                else:
+                    self.local_current_path = os.path.join(self.local_current_path, name)
             self.refresh_local_list()
         else:
-            # 원격 경로 변경
+            if self.remote_current_path == "Pending...":
+                return
+                
             if name == "..":
-                parts = self.remote_rel_path.replace("\\", "/").strip("/").split("/")
-                self.remote_rel_path = "/".join(parts[:-1]) if len(parts) > 1 else ""
+                if self.remote_current_path == "/storage/emulated/0" or self.remote_current_path == "/":
+                    return # 최상위 제한
+                
+                parts = self.remote_current_path.rstrip("/").split("/")
+                if len(parts) > 1:
+                    self.remote_current_path = "/".join(parts[:-1])
+                else:
+                    self.remote_current_path = "/"
             else:
-                self.remote_rel_path = f"{self.remote_rel_path}/{name}".strip("/")
+                self.remote_current_path = f"{self.remote_current_path}/{name}".replace("//", "/")
+                
             self.request_remote_list()
 
     def transfer_left_to_right(self):
-        """
-        왼쪽 -> 오른쪽 전송:
-        - 도움 주기(is_client=True)인 경우: 원격 폰(왼쪽)에서 로컬 PC(오른쪽)로 다운로드 (Pull)
-        - 도움 받기(is_client=False)인 경우: 로컬 PC(왼쪽)에서 원격 폰(오른쪽)으로 업로드 (Push)
-        """
         list_widget = self.list_left
         selected_items = list_widget.selectedItems()
         if not selected_items:
@@ -359,27 +393,27 @@ class FileTransferDialog(QDialog):
             
         data = selected_items[0].data(Qt.UserRole)
         if data.get("is_dir", False):
-            QMessageBox.warning(self, "경고", "폴더 전송은 지원하지 않습니다. 파일만 전송 가능합니다.")
+            QMessageBox.warning(self, "경고", "폴더 전송은 지원하지 않습니다.")
             return
             
         filename = data.get("name")
         
         if self.is_client:
-            # Pull: 원격(왼쪽)에서 파일 요청해서 로컬(오른쪽) 현재 폴더에 저장
-            src_path = f"{self.remote_rel_path}/{filename}".strip("/")
+            # Pull: 원격(왼쪽) -> 로컬(오른쪽) 현재 폴더
+            if self.local_current_path == "My PC":
+                QMessageBox.warning(self, "경고", "드라이브 루트 화면(내 PC)에서는 직접 저장할 수 없습니다. 특정 폴더 안으로 이동해 주세요.")
+                return
+            src_path = f"{self.remote_current_path}/{filename}".replace("//", "/")
             self.lbl_status.setText(f"'{filename}' 다운로드 요청 중...")
             if self.send_cmd_fn:
                 self.send_cmd_fn(f"FS_FILE_REQ|{src_path}")
         else:
-            # Push: 로컬(왼쪽)에서 원격(오른쪽) 현재 폴더로 전송
+            # Push: 로컬(왼쪽) -> 원격(오른쪽) 현재 폴더
+            if self.local_current_path == "My PC":
+                return
             self.send_local_file(filename)
 
     def transfer_right_to_left(self):
-        """
-        오른쪽 -> 왼쪽 전송:
-        - 도움 주기(is_client=True)인 경우: 로컬 PC(오른쪽)에서 원격 폰(왼쪽)으로 업로드 (Push)
-        - 도움 받기(is_client=False)인 경우: 원격 폰(오른쪽)에서 로컬 PC(왼쪽)로 다운로드 (Pull)
-        """
         list_widget = self.list_right
         selected_items = list_widget.selectedItems()
         if not selected_items:
@@ -388,29 +422,29 @@ class FileTransferDialog(QDialog):
             
         data = selected_items[0].data(Qt.UserRole)
         if data.get("is_dir", False):
-            QMessageBox.warning(self, "경고", "폴더 전송은 지원하지 않습니다. 파일만 전송 가능합니다.")
+            QMessageBox.warning(self, "경고", "폴더 전송은 지원하지 않습니다.")
             return
             
         filename = data.get("name")
         
         if self.is_client:
-            # Push: 로컬(오른쪽)에서 원격(왼쪽) 현재 폴더로 전송
+            # Push: 로컬(오른쪽) -> 원격(왼쪽) 현재 폴더
+            if self.local_current_path == "My PC":
+                return
             self.send_local_file(filename)
         else:
-            # Pull: 원격(오른쪽)에서 파일 요청해서 로컬(왼쪽) 현재 폴더에 저장
-            src_path = f"{self.remote_rel_path}/{filename}".strip("/")
+            # Pull: 원격(오른쪽) -> 로컬(왼쪽) 현재 폴더
+            if self.local_current_path == "My PC":
+                QMessageBox.warning(self, "경고", "드라이브 루트 화면(내 PC)에서는 직접 저장할 수 없습니다. 특정 폴더 안으로 이동해 주세요.")
+                return
+            src_path = f"{self.remote_current_path}/{filename}".replace("//", "/")
             self.lbl_status.setText(f"'{filename}' 다운로드 요청 중...")
             if self.send_cmd_fn:
                 self.send_cmd_fn(f"FS_FILE_REQ|{src_path}")
 
     def send_local_file(self, filename):
-        full_path = os.path.normpath(os.path.join(self.downloads_path, self.local_rel_path, filename))
+        full_path = os.path.normpath(os.path.join(self.local_current_path, filename))
         
-        # 보안 검증: Downloads 폴더 외부 파일 접근 차단
-        if not full_path.startswith(self.downloads_path):
-            QMessageBox.warning(self, "오류", "잘못된 경로 접근입니다.")
-            return
-            
         if not os.path.exists(full_path):
             QMessageBox.warning(self, "오류", "파일이 존재하지 않습니다.")
             return
@@ -429,8 +463,8 @@ class FileTransferDialog(QDialog):
                 data = f.read()
             base64_data = base64.b64encode(data).decode("utf-8")
             
-            # 상대방의 현재 디렉토리에 저장되도록 전송 경로 구성
-            target_path = f"{self.remote_rel_path}/{filename}".strip("/")
+            # 상대방의 현재 절대 경로 디렉토리에 저장
+            target_path = f"{self.remote_current_path}/{filename}".replace("//", "/")
             
             if self.send_cmd_fn:
                 self.send_cmd_fn(f"FS_FILE_SEND|{target_path}|{base64_data}")
@@ -450,12 +484,11 @@ class FileTransferDialog(QDialog):
             filename = os.path.basename(target_path)
             self.lbl_status.setText(f"'{filename}' 수신 및 저장 중...")
             
-            # 보안 경로 조립 및 검증
-            full_path = os.path.normpath(os.path.join(self.downloads_path, self.local_rel_path, filename))
-            if not full_path.startswith(self.downloads_path):
-                logger.error("Path traversal attack detected on file receive!")
-                self.lbl_status.setText("경로 오류로 수신이 거부되었습니다.")
-                return
+            if self.local_current_path == "My PC":
+                # 드라이브 루트 영역일 경우 기본 Downloads 폴더에 백업 저장
+                full_path = os.path.join(self.downloads_path, filename)
+            else:
+                full_path = os.path.join(self.local_current_path, filename)
                 
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             data = base64.b64decode(base64_data)
@@ -464,8 +497,6 @@ class FileTransferDialog(QDialog):
                 f.write(data)
                 
             self.lbl_status.setText(f"'{filename}' 저장 완료!")
-            
-            # 새로고침 자동 수행
             self.refresh_local_list()
         except Exception as e:
             logger.error(f"Failed to save received file: {e}")
@@ -475,22 +506,15 @@ class FileTransferDialog(QDialog):
         """
         원격 기기에서 로컬 파일을 요청했을 때 전송합니다.
         """
-        # 보안 경로 검증
-        full_path = os.path.normpath(os.path.join(self.downloads_path, requested_path))
-        if not full_path.startswith(self.downloads_path):
-            logger.error("Path traversal attack detected on file request!")
-            return
-            
-        if not os.path.exists(full_path):
+        if not os.path.exists(requested_path):
             logger.error(f"Requested file does not exist: {requested_path}")
             return
             
         try:
-            with open(full_path, "rb") as f:
+            with open(requested_path, "rb") as f:
                 data = f.read()
             base64_data = base64.b64encode(data).decode("utf-8")
             if self.send_cmd_fn:
-                # 상대방의 현재 상대 경로를 유지하여 전송하도록 상대경로 그대로 돌려줌
                 self.send_cmd_fn(f"FS_FILE_SEND|{requested_path}|{base64_data}")
         except Exception as e:
             logger.error(f"Failed to read and send requested file {requested_path}: {e}")

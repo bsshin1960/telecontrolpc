@@ -622,13 +622,16 @@ class MainWindow(QMainWindow):
     def trigger_file_transfer(self):
         self.open_file_transfer_ui(remote_triggered=False)
 
-    def open_file_transfer_ui(self, remote_triggered=False):
+    def open_file_transfer_ui(self, remote_triggered=False, initial_remote_path="Pending..."):
         is_active = self.client.is_connected or (self.server.is_running and self.server.client_connected)
         if not is_active:
             QMessageBox.warning(self, "안내", "원격 연결이 수립된 후에 파일 전송 기능을 사용할 수 있습니다.")
             return
 
         if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
+            if initial_remote_path != "Pending...":
+                self.file_transfer_dialog.remote_current_path = initial_remote_path
+                self.file_transfer_dialog.refresh_all()
             self.file_transfer_dialog.raise_()
             return
 
@@ -643,8 +646,13 @@ class MainWindow(QMainWindow):
             
         self.file_transfer_dialog = FileTransferDialog(self, is_client=is_client_mode, send_cmd_fn=send_fn)
         
+        if initial_remote_path != "Pending...":
+            self.file_transfer_dialog.remote_current_path = initial_remote_path
+            self.file_transfer_dialog.refresh_all()
+            
         if not remote_triggered:
-            self.send_fs_command("FS_OPEN_UI")
+            # 나의 초기 로컬 경로를 상대방에게 동봉해 UI 열림 전송
+            self.send_fs_command(f"FS_OPEN_UI|{self.file_transfer_dialog.local_current_path}")
             
         self.file_transfer_dialog.show()
 
@@ -657,8 +665,14 @@ class MainWindow(QMainWindow):
     def handle_file_message(self, message: str):
         logger.info(f"Received file system command: {message[:100]}")
         
-        if message == "FS_OPEN_UI":
-            self.open_file_transfer_ui(remote_triggered=True)
+        if message.startswith("FS_OPEN_UI"):
+            initial_path = "Pending..."
+            if "|" in message:
+                try:
+                    initial_path = message.split("|", 1)[1]
+                except Exception:
+                    pass
+            self.open_file_transfer_ui(remote_triggered=True, initial_remote_path=initial_path)
             return
             
         if message == "FS_CLOSE_UI":
@@ -674,7 +688,7 @@ class MainWindow(QMainWindow):
                     parts = message.split("|", 2)
                     remote_rel = parts[1]
                     json_str = parts[2]
-                    self.file_transfer_dialog.remote_rel_path = remote_rel
+                    self.file_transfer_dialog.remote_current_path = remote_rel
                     files = json.loads(json_str)
                     self.file_transfer_dialog.update_remote_file_list(files)
                 except Exception as e:
