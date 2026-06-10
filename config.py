@@ -8,7 +8,7 @@ CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".telecontrol_config.json")
 
 DEFAULT_RELAY_HOST = "54.242.81.228"
 DEFAULT_RELAY_PORT = 8080
-DEFAULT_AUTO_START = True
+DEFAULT_AUTO_START = False
 
 
 def load_config() -> dict:
@@ -32,7 +32,7 @@ def load_config() -> dict:
     return defaults
 
 
-def save_config(relay_host: str, relay_port: int, auto_start: bool = True):
+def save_config(relay_host: str, relay_port: int, auto_start: bool = DEFAULT_AUTO_START):
     """
     릴레이 서버 설정을 ~/.telecontrol_config.json 에 저장합니다.
     """
