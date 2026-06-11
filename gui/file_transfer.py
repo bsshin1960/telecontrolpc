@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import string
+import asyncio
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
     QListWidget, QPushButton, QLabel, QProgressBar,
@@ -23,6 +24,38 @@ def get_drives():
             drives.append(drive)
     return drives
 
+class ToastNotification(QDialog):
+    def __init__(self, parent=None, text=""):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        layout = QVBoxLayout(self)
+        label = QLabel(text, self)
+        label.setStyleSheet("""
+            background-color: rgba(229, 57, 53, 255);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 12px 24px;
+            border: 2px solid white;
+        """)
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.adjustSize()
+        
+        if parent:
+            # Position at the exact center of parent in local coordinates
+            x = (parent.width() - self.width()) // 2
+            y = (parent.height() - self.height()) // 2
+            self.move(x, y)
+        
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(5000, self.close)
+
 class FileTransferDialog(QDialog):
     def __init__(self, parent=None, is_client=True, send_cmd_fn=None):
         super().__init__(parent)
@@ -34,6 +67,8 @@ class FileTransferDialog(QDialog):
         # 탐색할 절대 경로 추적 (기본 시작은 Downloads 폴더)
         self.local_current_path = self.downloads_path
         self.remote_current_path = "Pending..."  # 스마트폰이 준비 완료되면 초기 경로를 전달받음
+        self.is_cancelled = False
+        self.active_receivers = {}
             
         self.setWindowTitle("파일 전송 탐색기 (File Transfer)")
         self.resize(1024, 720)
@@ -205,11 +240,21 @@ class FileTransferDialog(QDialog):
         self.list_left.itemDoubleClicked.connect(self.on_left_double_click)
         self.list_right.itemDoubleClicked.connect(self.on_right_double_click)
         
-        # Bottom Progress Bar
+        # Bottom Progress Bar & Cancel Button
+        bottom_layout = QHBoxLayout()
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setVisible(False)
         self.progress_bar.setFixedHeight(10)
-        main_layout.addWidget(self.progress_bar)
+        bottom_layout.addWidget(self.progress_bar, 1)
+        
+        self.btn_cancel_transfer = QPushButton("전송 중단", self)
+        self.btn_cancel_transfer.setStyleSheet("background-color: #ef4444; color: white; font-weight: bold; border: none;")
+        self.btn_cancel_transfer.setVisible(False)
+        self.btn_cancel_transfer.setFixedHeight(24)
+        self.btn_cancel_transfer.clicked.connect(self.cancel_transfer)
+        bottom_layout.addWidget(self.btn_cancel_transfer)
+        
+        main_layout.addLayout(bottom_layout)
 
     def refresh_all(self):
         self.refresh_local_list()
@@ -329,7 +374,9 @@ class FileTransferDialog(QDialog):
                 item.setData(Qt.UserRole, {"name": name, "is_dir": False})
                 list_widget.addItem(item)
                 
-            self.lbl_status.setText("파일 목록이 동기화되었습니다.")
+            current_status = self.lbl_status.text()
+            if current_status not in ["파일 전송 완료", "파일 수신 완료", "파일이 있습니다."]:
+                self.lbl_status.setText("")
         except Exception as e:
             logger.error(f"Error updating remote list: {e}")
             self.lbl_status.setText("원격 목록 분석 실패")
@@ -442,87 +489,282 @@ class FileTransferDialog(QDialog):
                 self.send_cmd_fn(f"FS_FILE_REQ|{src_path}")
 
     def send_local_file(self, filename):
+        asyncio.create_task(self.send_local_file_async(filename))
+
+    async def send_local_file_async(self, filename):
         full_path = os.path.normpath(os.path.join(self.local_current_path, filename))
-        
         if not os.path.exists(full_path):
             QMessageBox.warning(self, "오류", "파일이 존재하지 않습니다.")
             return
             
         file_size = os.path.getsize(full_path)
-        if file_size > 10 * 1024 * 1024:
-            QMessageBox.warning(self, "경고", "10MB 이상의 파일은 전송할 수 없습니다.")
+        if file_size > 50 * 1024 * 1024:
+            QMessageBox.warning(self, "경고", "50MB 이상의 파일은 전송할 수 없습니다.")
             return
             
+        if file_size >= 10 * 1024 * 1024:
+            self.toast = ToastNotification(self, "비용 발생 주의!")
+            self.toast.show()
+
         self.lbl_status.setText(f"'{filename}' 전송 중...")
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
+        self.btn_cancel_transfer.setVisible(True)
+        
+        chunk_size = 512 * 1024  # 512KB
+        total_chunks = (file_size + chunk_size - 1) // chunk_size
+        self.progress_bar.setRange(0, total_chunks)
+        self.progress_bar.setValue(0)
+        
+        self.is_cancelled = False
+        success = False
         
         try:
-            with open(full_path, "rb") as f:
-                data = f.read()
-            base64_data = base64.b64encode(data).decode("utf-8")
-            
-            # 상대방의 현재 절대 경로 디렉토리에 저장
             target_path = f"{self.remote_current_path}/{filename}".replace("//", "/")
-            
             if self.send_cmd_fn:
-                self.send_cmd_fn(f"FS_FILE_SEND|{target_path}|{base64_data}")
+                self.send_cmd_fn(f"FS_FILE_START|{target_path}|{total_chunks}")
+            
+            with open(full_path, "rb") as f:
+                chunk_idx = 0
+                while True:
+                    if self.is_cancelled:
+                        if self.send_cmd_fn:
+                            self.send_cmd_fn(f"FS_FILE_CANCEL|{filename}")
+                        self.lbl_status.setText("전송 취소됨")
+                        self.progress_bar.setVisible(False)
+                        self.btn_cancel_transfer.setVisible(False)
+                        return
+                    
+                    data = f.read(chunk_size)
+                    if not data:
+                        break
+                    
+                    base64_chunk = base64.b64encode(data).decode("utf-8")
+                    if self.send_cmd_fn:
+                        self.send_cmd_fn(f"FS_FILE_CHUNK|{filename}|{chunk_idx}|{base64_chunk}")
+                    
+                    chunk_idx += 1
+                    self.lbl_status.setText(f"'{filename}' 파일 전송 중...")
+                    
+                    await asyncio.sleep(0.01)
+                    
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_END|{filename}")
+            self.lbl_status.setText(f"'{filename}' 전송 완료 대기 중...")
+            success = True
         except Exception as e:
             logger.error(f"Failed to send file {filename}: {e}")
-            QMessageBox.critical(self, "오류", f"파일 전송 실패: {e}")
-            self.lbl_status.setText("파일 전송 실패")
-            self.progress_bar.setVisible(False)
-
-    def handle_remote_file_received(self, target_path, base64_data):
-        """
-        원격에서 파일을 받아 로컬 탐색 경로 밑에 저장합니다.
-        """
-        try:
-            filename = os.path.basename(target_path)
-            self.lbl_status.setText(f"'{filename}' 수신 및 저장 중...")
-            
-            if self.local_current_path == "My PC":
-                # 드라이브 루트 영역일 경우 기본 Downloads 폴더에 백업 저장
-                full_path = os.path.join(self.downloads_path, filename)
-            else:
-                full_path = os.path.join(self.local_current_path, filename)
-                
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            data = base64.b64decode(base64_data)
-            
-            with open(full_path, "wb") as f:
-                f.write(data)
-                
-            self.lbl_status.setText(f"'{filename}' 저장 완료! (저장 위치: {full_path})")
-            self.refresh_local_list()
-            
-            # Send confirmation back to Android
-            if self.send_cmd_fn:
-                self.send_cmd_fn(f"FS_FILE_SEND_OK|{filename}|{full_path}")
-        except Exception as e:
-            logger.error(f"Failed to save received file: {e}")
-            self.lbl_status.setText("파일 저장 실패")
             if self.send_cmd_fn:
                 self.send_cmd_fn(f"FS_FILE_SEND_ERR|{filename}|{e}")
+            QMessageBox.critical(self, "오류", f"파일 전송 실패: {e}")
+            self.lbl_status.setText("파일 전송 실패")
+        finally:
+            if not success:
+                self.progress_bar.setVisible(False)
+                self.btn_cancel_transfer.setVisible(False)
 
     def handle_remote_file_requested(self, requested_path):
         """
         원격 기기에서 로컬 파일을 요청했을 때 전송합니다.
         """
+        asyncio.create_task(self.send_requested_file_async(requested_path))
+
+    async def send_requested_file_async(self, requested_path):
         if not os.path.exists(requested_path):
             logger.error(f"Requested file does not exist: {requested_path}")
             return
             
+        filename = os.path.basename(requested_path)
+        file_size = os.path.getsize(requested_path)
+        
+        self.lbl_status.setText(f"'{filename}' 전송 중...")
+        self.progress_bar.setVisible(True)
+        self.btn_cancel_transfer.setVisible(True)
+        
+        chunk_size = 512 * 1024  # 512KB
+        total_chunks = (file_size + chunk_size - 1) // chunk_size
+        self.progress_bar.setRange(0, total_chunks)
+        self.progress_bar.setValue(0)
+        
+        self.is_cancelled = False
+        success = False
+        
         try:
-            with open(requested_path, "rb") as f:
-                data = f.read()
-            base64_data = base64.b64encode(data).decode("utf-8")
             if self.send_cmd_fn:
-                self.send_cmd_fn(f"FS_FILE_SEND|{requested_path}|{base64_data}")
+                self.send_cmd_fn(f"FS_FILE_START|{requested_path}|{total_chunks}")
+            
+            with open(requested_path, "rb") as f:
+                chunk_idx = 0
+                while True:
+                    if self.is_cancelled:
+                        if self.send_cmd_fn:
+                            self.send_cmd_fn(f"FS_FILE_CANCEL|{filename}")
+                        self.lbl_status.setText("전송 취소됨")
+                        self.progress_bar.setVisible(False)
+                        self.btn_cancel_transfer.setVisible(False)
+                        return
+                    
+                    data = f.read(chunk_size)
+                    if not data:
+                        break
+                    
+                    base64_chunk = base64.b64encode(data).decode("utf-8")
+                    if self.send_cmd_fn:
+                        self.send_cmd_fn(f"FS_FILE_CHUNK|{filename}|{chunk_idx}|{base64_chunk}")
+                    
+                    chunk_idx += 1
+                    self.lbl_status.setText(f"'{filename}' 파일 전송 중...")
+                    
+                    await asyncio.sleep(0.01)
+                    
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_END|{filename}")
+            self.lbl_status.setText(f"'{filename}' 전송 완료 대기 중...")
+            success = True
         except Exception as e:
-            logger.error(f"Failed to read and send requested file {requested_path}: {e}")
+            logger.error(f"Failed to send requested file {requested_path}: {e}")
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_SEND_ERR|{filename}|{e}")
+            self.lbl_status.setText("파일 전송 실패")
+        finally:
+            if not success:
+                self.progress_bar.setVisible(False)
+                self.btn_cancel_transfer.setVisible(False)
+
+    def handle_file_start(self, target_path, total_chunks_str):
+        try:
+            total_chunks = int(total_chunks_str)
+            filename = os.path.basename(target_path)
+            
+            if self.local_current_path == "My PC":
+                full_path = os.path.normpath(os.path.join(self.downloads_path, filename))
+            else:
+                full_path = os.path.normpath(os.path.join(self.local_current_path, filename))
+                
+            if os.path.exists(full_path):
+                self.lbl_status.setText("파일이 있습니다.")
+                self.progress_bar.setVisible(False)
+                self.btn_cancel_transfer.setVisible(False)
+                if self.send_cmd_fn:
+                    self.send_cmd_fn(f"FS_FILE_EXISTS|{filename}")
+                return
+                
+            self.lbl_status.setText(f"'{filename}' 수신 중...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, total_chunks)
+            self.progress_bar.setValue(0)
+            self.btn_cancel_transfer.setVisible(True)
+            
+            tmp_path = full_path + ".tmp"
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+                    
+            os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
+            
+            self.active_receivers[filename] = {
+                "total_chunks": total_chunks,
+                "tmp_path": tmp_path,
+                "final_path": full_path
+            }
+        except Exception as e:
+            logger.error(f"Error handling file start: {e}")
+            self.lbl_status.setText("수신 시작 실패")
+
+    def handle_file_chunk(self, filename, chunk_idx_str, base64_chunk):
+        try:
+            chunk_idx = int(chunk_idx_str)
+            receiver = self.active_receivers.get(filename)
+            if not receiver:
+                return
+                
+            tmp_path = receiver["tmp_path"]
+            data = base64.b64decode(base64_chunk)
+            
+            with open(tmp_path, "ab") as f:
+                f.write(data)
+                
+            self.progress_bar.setValue(chunk_idx + 1)
+            self.lbl_status.setText(f"'{filename}' 수신 중 ({chunk_idx + 1}/{receiver['total_chunks']})...")
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_PROGRESS|{filename}|{chunk_idx}")
+        except Exception as e:
+            logger.error(f"Error handling file chunk: {e}")
+
+    def handle_file_end(self, filename):
+        try:
+            receiver = self.active_receivers.pop(filename, None)
+            if not receiver:
+                return
+                
+            tmp_path = receiver["tmp_path"]
+            final_path = receiver["final_path"]
+            
+            if os.path.exists(tmp_path):
+                if os.path.exists(final_path):
+                    try:
+                        os.remove(final_path)
+                    except Exception:
+                        pass
+                os.rename(tmp_path, final_path)
+                
+            self.lbl_status.setText("파일 수신 완료")
+            self.progress_bar.setVisible(False)
+            self.btn_cancel_transfer.setVisible(False)
+            self.refresh_local_list()
+            
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_SEND_OK|{filename}|{final_path}")
+        except Exception as e:
+            logger.error(f"Error handling file end: {e}")
+            self.lbl_status.setText("수신 완료 처리 실패")
+            self.progress_bar.setVisible(False)
+            self.btn_cancel_transfer.setVisible(False)
+
+    def handle_file_cancel(self, filename):
+        try:
+            receiver = self.active_receivers.pop(filename, None)
+            if receiver:
+                tmp_path = receiver["tmp_path"]
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+            self.lbl_status.setText("전송 취소됨")
+            self.progress_bar.setVisible(False)
+            self.btn_cancel_transfer.setVisible(False)
+        except Exception as e:
+            logger.error(f"Error handling file cancel: {e}")
+
+    def handle_file_progress(self, filename, chunk_idx_str):
+        try:
+            chunk_idx = int(chunk_idx_str)
+            self.progress_bar.setValue(chunk_idx + 1)
+            self.lbl_status.setText(f"'{filename}' 파일 전송 중 ({chunk_idx + 1}/{self.progress_bar.maximum()})...")
+        except Exception as e:
+            logger.error(f"Error handling progress: {e}")
+
+    def cancel_transfer(self):
+        self.is_cancelled = True
+        for filename, receiver in list(self.active_receivers.items()):
+            if self.send_cmd_fn:
+                self.send_cmd_fn(f"FS_FILE_CANCEL|{filename}")
+            tmp_path = receiver["tmp_path"]
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        self.active_receivers.clear()
+        
+        self.lbl_status.setText("전송 취소됨")
+        self.progress_bar.setVisible(False)
+        self.btn_cancel_transfer.setVisible(False)
 
     def closeEvent(self, event):
+        self.cancel_transfer()
         if self.send_cmd_fn:
             self.send_cmd_fn("FS_CLOSE_UI")
         event.accept()

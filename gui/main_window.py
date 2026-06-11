@@ -697,23 +697,45 @@ class MainWindow(QMainWindow):
                     self.file_transfer_dialog.update_remote_file_list(files)
                 except Exception as e:
                     logger.error(f"Error parsing file list: {e}")
-            elif message.startswith("FS_FILE_SEND|"):
+            elif message.startswith("FS_FILE_START|"):
                 try:
-                    parts = message.split("|", 2)
-                    filename = parts[1]
-                    base64_data = parts[2]
-                    self.file_transfer_dialog.handle_remote_file_received(filename, base64_data)
+                    parts = message.split("|")
+                    if len(parts) >= 3:
+                        target_path = parts[1]
+                        total_chunks = parts[2]
+                        self.file_transfer_dialog.handle_file_start(target_path, total_chunks)
                 except Exception as e:
-                    logger.error(f"Error saving received file: {e}")
+                    logger.error(f"Error starting received file: {e}")
+            elif message.startswith("FS_FILE_CHUNK|"):
+                try:
+                    parts = message.split("|")
+                    if len(parts) >= 4:
+                        filename = parts[1]
+                        chunk_idx = parts[2]
+                        base64_chunk = parts[3]
+                        self.file_transfer_dialog.handle_file_chunk(filename, chunk_idx, base64_chunk)
+                except Exception as e:
+                    logger.error(f"Error handling chunk: {e}")
+            elif message.startswith("FS_FILE_END|"):
+                try:
+                    filename = message[len("FS_FILE_END|"):]
+                    self.file_transfer_dialog.handle_file_end(filename)
+                except Exception as e:
+                    logger.error(f"Error finishing file: {e}")
+            elif message.startswith("FS_FILE_CANCEL|"):
+                try:
+                    filename = message[len("FS_FILE_CANCEL|"):]
+                    self.file_transfer_dialog.handle_file_cancel(filename)
+                except Exception as e:
+                    logger.error(f"Error cancelling file: {e}")
             elif message.startswith("FS_FILE_SEND_OK|"):
-                try:
-                    parts = message.split("|", 2)
-                    filename = parts[1]
-                    target_path = parts[2]
-                    self.file_transfer_dialog.lbl_status.setText(f"'{filename}' 전송 완료! (저장 위치: {target_path})")
-                    self.file_transfer_dialog.progress_bar.setVisible(False)
-                except Exception as e:
-                    logger.error(f"Error handling file send OK: {e}")
+                self.file_transfer_dialog.lbl_status.setText("파일 전송 완료")
+                self.file_transfer_dialog.progress_bar.setVisible(False)
+                self.file_transfer_dialog.btn_cancel_transfer.setVisible(False)
+            elif message.startswith("FS_FILE_EXISTS|"):
+                self.file_transfer_dialog.lbl_status.setText("파일이 있습니다.")
+                self.file_transfer_dialog.progress_bar.setVisible(False)
+                self.file_transfer_dialog.btn_cancel_transfer.setVisible(False)
             elif message.startswith("FS_FILE_SEND_ERR|"):
                 try:
                     parts = message.split("|", 2)
@@ -721,8 +743,18 @@ class MainWindow(QMainWindow):
                     err = parts[2]
                     self.file_transfer_dialog.lbl_status.setText(f"'{filename}' 전송 실패: {err}")
                     self.file_transfer_dialog.progress_bar.setVisible(False)
+                    self.file_transfer_dialog.btn_cancel_transfer.setVisible(False)
                 except Exception as e:
                     logger.error(f"Error handling file send ERR: {e}")
+            elif message.startswith("FS_FILE_PROGRESS|"):
+                try:
+                    parts = message.split("|")
+                    if len(parts) >= 3:
+                        filename = parts[1]
+                        chunk_idx_str = parts[2]
+                        self.file_transfer_dialog.handle_file_progress(filename, chunk_idx_str)
+                except Exception as e:
+                    logger.error(f"Error handling file progress message: {e}")
             elif message.startswith("FS_FILE_REQ|"):
                 try:
                     filename = message.split("|", 1)[1]

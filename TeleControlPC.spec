@@ -4,7 +4,7 @@ block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['c:\\Temp\\Antigrvity\\telecontrolpc'],
     binaries=[],
     datas=[],
     hiddenimports=[
@@ -27,6 +27,19 @@ a = Analysis(
         'socket',
         'json',
         'os',
+        'config',
+        'gui',
+        'gui.main_window',
+        'gui.file_transfer',
+        'gui.remote_viewer',
+        'gui.styles',
+        'network',
+        'network.server',
+        'network.client',
+        'capture',
+        'capture.screen_capture',
+        'input',
+        'input.input_injector',
     ],
     hookspath=[],
     hooksconfig={},

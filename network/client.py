@@ -69,7 +69,7 @@ class RemoteControlClient:
                 uri,
                 ping_interval=15,
                 ping_timeout=30,
-                max_size=10 * 1024 * 1024  # 10MB limit for frames
+                max_size=80 * 1024 * 1024  # 80MB limit for frames
             )
             self.is_connected = True
             self.is_windows_host = False # reset

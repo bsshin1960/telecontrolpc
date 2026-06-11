@@ -127,7 +127,7 @@ async def handler(websocket, path=None):
 async def main():
     port = 8080
     logger.info(f"Starting AWS Relay Server on 0.0.0.0:{port}...")
-    server = await websockets.serve(handler, "0.0.0.0", port, max_size=10 * 1024 * 1024)
+    server = await websockets.serve(handler, "0.0.0.0", port, max_size=80 * 1024 * 1024)
     await server.wait_closed()
 
 if __name__ == "__main__":
