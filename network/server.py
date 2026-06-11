@@ -139,6 +139,7 @@ class RemoteControlServer:
                     elif message == "CLIENT_DISCONNECTED":
                         self.client_connected = False
                         self.log_message("원격 도움 제공자(클라이언트)의 연결이 해제되었습니다.")
+                        asyncio.create_task(self.stop())
                     elif message.startswith("FS_"):
                         if self.file_callback:
                             self.file_callback(message)

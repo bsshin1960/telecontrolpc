@@ -466,6 +466,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "file_transfer_dialog") and self.file_transfer_dialog:
                 self.file_transfer_dialog.close()
                 self.file_transfer_dialog = None
+            asyncio.create_task(self.stop_server_async())
 
     def handle_server_id_received(self, session_id: str):
         formatted_id = f"{session_id[:3]} {session_id[3:]}"
