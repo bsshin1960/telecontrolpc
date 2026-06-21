@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import random
 import logging
+import sys
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("RelayServer")
@@ -125,9 +126,23 @@ async def handler(websocket, path=None):
         await websocket.close()
 
 async def main():
-    port = 8080
+    port = 80
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            logger.warning(f"Invalid port value: {sys.argv[1]}. Using default port 80.")
+            port = 80
+
     logger.info(f"Starting AWS Relay Server on 0.0.0.0:{port}...")
-    server = await websockets.serve(handler, "0.0.0.0", port, max_size=80 * 1024 * 1024)
+    server = await websockets.serve(
+        handler,
+        "0.0.0.0",
+        port,
+        max_size=80 * 1024 * 1024,
+        ping_interval=30,
+        ping_timeout=60
+    )
     await server.wait_closed()
 
 if __name__ == "__main__":

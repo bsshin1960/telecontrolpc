@@ -7,8 +7,8 @@ logger = logging.getLogger("Config")
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".telecontrol_config.json")
 
 DEFAULT_RELAY_HOST = "54.242.81.228"
-DEFAULT_RELAY_PORT = 8080
-DEFAULT_AUTO_START = False
+DEFAULT_RELAY_PORT = 80
+DEFAULT_AUTO_START = True
 
 
 def load_config() -> dict:

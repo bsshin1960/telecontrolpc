@@ -29,6 +29,7 @@ class ToastNotification(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_DeleteOnClose)
         
         layout = QVBoxLayout(self)
         label = QLabel(text, self)
@@ -503,6 +504,11 @@ class FileTransferDialog(QDialog):
             return
             
         if file_size >= 10 * 1024 * 1024:
+            if hasattr(self, "toast") and self.toast:
+                try:
+                    self.toast.close()
+                except Exception:
+                    pass
             self.toast = ToastNotification(self, "비용 발생 주의!")
             self.toast.show()
 

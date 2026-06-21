@@ -543,7 +543,8 @@ class MainWindow(QMainWindow):
             self.client.set_callbacks(
                 frame_cb=self.viewer.update_frame,
                 status_cb=self.handle_client_status_update,
-                stats_cb=self.handle_client_stats_update
+                stats_cb=self.handle_client_stats_update,
+                settings_status_cb=self.handle_settings_status
             )
 
             # 뷰어에 연결 중 상태 표시
@@ -592,7 +593,25 @@ class MainWindow(QMainWindow):
 
     def handle_client_status_update(self, message: str):
         if "연결이 해제되었습니다" in message or "연결 실패" in message or "연결이 종료되었습니다" in message:
-            self.handle_client_closed()
+            if self.client.going_to_settings:
+                # 설정 화면 이동 중이면 연결 끊김 아닙니다
+                self.viewer.set_status_text("📱 휴대폰이 설정 화면 이동 중...\n설정 완료 후 자동으로 화면이 재개됩니다.")
+                logger.info("[Settings] 연결 일시 중단 중 (설정 화면) — 심각한 연결 끊김이 아닙니다")
+            else:
+                self.handle_client_closed()
+
+    def handle_settings_status(self, status: str, setting_name: str):
+        """
+        휴대폰이 설정으로 이동하거나 복굼할 때 호출됨.
+        - status == 'going': 설정 화면 이동 중
+        - status == 'returned': 설정에서 돌아왔을 때
+        """
+        if status == "going":
+            overlay_text = f"📱 휴대폰이 [{setting_name}] 화면으로 이동 중\n\n⚠️  이것은 연결 끊김이 아닙니다!\n설정 완료 후 돌아오면 자동으로 화면이 재개됩니다."
+            self.viewer.current_pixmap = None
+            self.viewer.set_status_text(overlay_text)
+        elif status == "returned":
+            self.viewer.set_status_text("✅ 화면 스트림 재개 중...")  # 공통: 프레임 오면 자동으로 화면 표시됨
 
     def handle_client_stats_update(self, fps: float, kb_s: float, latency: float):
         host_type = "Windows PC" if self.client.is_windows_host else "안드로이드"

@@ -17,6 +17,7 @@ class RemoteControlClient:
         self.websocket = None
         self.is_connected = False
         self.is_windows_host = False
+        self.going_to_settings = False  # 휴대폰이 설정 화면 중인지 여부
         
         # Audio properties
         self.audio_output = None
@@ -33,6 +34,7 @@ class RemoteControlClient:
         self.status_callback = None
         self.stats_callback = None
         self.file_callback = None
+        self.settings_status_callback = None  # 설정 화면 이동/복굼 알림
         
         # Statistics
         self.frame_count = 0
@@ -40,10 +42,11 @@ class RemoteControlClient:
         self.last_stats_time = 0
         self.ping_latency = 0.0
 
-    def set_callbacks(self, frame_cb=None, status_cb=None, stats_cb=None):
+    def set_callbacks(self, frame_cb=None, status_cb=None, stats_cb=None, settings_status_cb=None):
         self.frame_callback = frame_cb
         self.status_callback = status_cb
         self.stats_callback = stats_cb
+        self.settings_status_callback = settings_status_cb
 
     def set_file_callback(self, cb):
         self.file_callback = cb
@@ -53,7 +56,7 @@ class RemoteControlClient:
         if self.status_callback:
             self.status_callback(message)
 
-    async def connect(self, host: str, port: int = 8080, session_id: str = ""):
+    async def connect(self, host: str, port: int = 80, session_id: str = ""):
         if self.is_connected:
             return
             
@@ -67,8 +70,8 @@ class RemoteControlClient:
         try:
             self.websocket = await websockets.connect(
                 uri,
-                ping_interval=15,
-                ping_timeout=30,
+                ping_interval=30,
+                ping_timeout=60,
                 max_size=80 * 1024 * 1024  # 80MB limit for frames
             )
             self.is_connected = True
@@ -171,6 +174,22 @@ class RemoteControlClient:
                     elif message == "HOST_DISCONNECTED":
                         self.log_status("원격 호스트의 접속이 종료되었습니다.")
                         asyncio.create_task(self.disconnect())
+                        continue
+                    elif message.startswith("GOING_TO_SETTINGS|"):
+                        # 휴대폰이 설정 화면으로 이동한 경우 — 연결 끊김이 아닙니다!
+                        setting_name = message.split("|", 1)[1] if "|" in message else ""
+                        self.going_to_settings = True
+                        status_msg = f"📱 휴대폰이 [{setting_name}] 화면으로 이동 중... (앞 화면이 잊시 미표시될 수 있습니다)"
+                        self.log_status(status_msg)
+                        if self.settings_status_callback:
+                            self.settings_status_callback("going", setting_name)
+                        continue
+                    elif message == "RETURNED_FROM_SETTINGS":
+                        # 화면에서 돌아왔을 때
+                        self.going_to_settings = False
+                        self.log_status("✅ 휴대폰이 설정에서 돌아왔습니다. 화면 스트림이 재개됩니다.")
+                        if self.settings_status_callback:
+                            self.settings_status_callback("returned", "")
                         continue
                     elif "device=windows" in message:
                         self.is_windows_host = True

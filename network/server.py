@@ -7,7 +7,7 @@ from input.input_injector import InputInjector
 logger = logging.getLogger("WebSocketServer")
 
 class RemoteControlServer:
-    def __init__(self, host="0.0.0.0", port=8080):
+    def __init__(self, host="0.0.0.0", port=80):
         self.host = host
         self.port = port
         self.server = None
@@ -34,6 +34,7 @@ class RemoteControlServer:
         self.client_connected = False
         self.id_callback = None
         self.file_callback = None
+        self.monitors_cache = None
 
     def set_log_callback(self, callback):
         self.log_callback = callback
@@ -58,6 +59,7 @@ class RemoteControlServer:
         self.scale = scale
         self.quality = quality
         self.fps = fps
+        self.monitors_cache = None
         self.log_message(f"Settings updated: Monitor={monitor_index}, Scale={scale}, Quality={quality}, FPS={fps}")
 
     async def start(self):
@@ -74,7 +76,7 @@ class RemoteControlServer:
                 uri,
                 ping_interval=15,
                 ping_timeout=30,
-                max_size=10 * 1024 * 1024  # 10MB limit
+                max_size=80 * 1024 * 1024  # 80MB limit
             )
             self.log_message("AWS 릴레이 서버 연결 성공. ID 발급 대기 중...")
             
@@ -178,7 +180,9 @@ class RemoteControlServer:
                 logger.debug(f"원격 마우스 이동: {params}")
 
             # Retrieve active monitor geometry if we need to map relative coordinates
-            monitors = self.capturer.get_monitors()
+            if not self.monitors_cache:
+                self.monitors_cache = self.capturer.get_monitors()
+            monitors = self.monitors_cache
             active_monitor = None
             for m in monitors:
                 if m["index"] == self.monitor_index:
